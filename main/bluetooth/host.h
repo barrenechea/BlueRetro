@@ -35,6 +35,9 @@ enum {
     BT_DEV_FB_DELAY,
     BT_DEV_CALIB_SET,
     BT_DEV_PPCP_DONE,
+    /* Latches the one time call to bt_host_le_pair_ok() once a BLE device is
+     * actually delivering reports, so its pairing strikes are forgiven. */
+    BT_DEV_LE_PAIR_OK,
 };
 
 struct bt_name_type {
@@ -133,6 +136,7 @@ extern struct bt_hci_pkt bt_hci_pkt_tmp;
 uint32_t bt_host_get_flag_dev_cnt(uint32_t flag);
 void bt_host_disconnect_all(void);
 void bt_host_le_pair_failed(bt_addr_le_t *addr);
+void bt_host_le_pair_ok(bt_addr_le_t *addr);
 uint32_t bt_host_le_is_pair_failed(bt_addr_le_t *addr);
 void bt_host_le_pair_fail_clear(void);
 int32_t bt_host_get_new_dev(struct bt_dev **device);

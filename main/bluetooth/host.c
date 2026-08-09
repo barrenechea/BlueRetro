@@ -453,49 +453,86 @@ void bt_host_disconnect_all(void) {
  * Kept in RAM only and cleared whenever the user asks to pair, so nothing here
  * is permanent and any device can still be paired deliberately. */
 #define BT_LE_PAIR_FAIL_MAX 8
-static bt_addr_le_t le_pair_fail[BT_LE_PAIR_FAIL_MAX];
-static uint32_t le_pair_fail_cnt = 0;
+/* Failures needed before an address is left alone. One is far too few: a
+ * controller with a stale stored key fails, the key is cleared on the way out,
+ * and the very next attempt is the one that works. Parking on the first failure
+ * blocks that retry and the controller can never pair again. */
+#define BT_LE_PAIR_FAIL_STRIKES 3
 
-static inline uint32_t bt_host_le_pair_fail_len(void) {
-    return (le_pair_fail_cnt < BT_LE_PAIR_FAIL_MAX) ? le_pair_fail_cnt : BT_LE_PAIR_FAIL_MAX;
+struct le_pair_fail {
+    bt_addr_le_t addr;
+    uint8_t strikes;
+    uint8_t used;
+};
+static struct le_pair_fail le_pair_fail[BT_LE_PAIR_FAIL_MAX];
+static uint32_t le_pair_fail_next = 0;
+
+static struct le_pair_fail *bt_host_le_pair_find(bt_addr_le_t *addr) {
+    for (uint32_t i = 0; i < BT_LE_PAIR_FAIL_MAX; i++) {
+        if (le_pair_fail[i].used
+                && memcmp(&le_pair_fail[i].addr, addr, sizeof(*addr)) == 0) {
+            return &le_pair_fail[i];
+        }
+    }
+    return NULL;
 }
 
 void bt_host_le_pair_failed(bt_addr_le_t *addr) {
-    uint32_t n = bt_host_le_pair_fail_len();
+    struct le_pair_fail *e = bt_host_le_pair_find(addr);
 
-    for (uint32_t i = 0; i < n; i++) {
-        if (memcmp(&le_pair_fail[i], addr, sizeof(*addr)) == 0) {
-            return;
-        }
+    if (e == NULL) {
+        /* A ring, so a busy room cannot fill this and wedge it. */
+        e = &le_pair_fail[le_pair_fail_next % BT_LE_PAIR_FAIL_MAX];
+        le_pair_fail_next++;
+        memcpy(&e->addr, addr, sizeof(*addr));
+        e->strikes = 0;
+        e->used = 1;
     }
 
-    /* A ring, so a busy room cannot fill this and wedge it. */
-    memcpy(&le_pair_fail[le_pair_fail_cnt % BT_LE_PAIR_FAIL_MAX], addr, sizeof(*addr));
-    le_pair_fail_cnt++;
+    if (e->strikes < 0xFF) {
+        e->strikes++;
+    }
 
-    printf("# %s: %02X:%02X:%02X:%02X:%02X:%02X parked until next pairing\n",
+    printf("# %s: %02X:%02X:%02X:%02X:%02X:%02X failed %u of %u%s\n",
         __FUNCTION__, addr->a.val[5], addr->a.val[4], addr->a.val[3],
-        addr->a.val[2], addr->a.val[1], addr->a.val[0]);
+        addr->a.val[2], addr->a.val[1], addr->a.val[0],
+        e->strikes, BT_LE_PAIR_FAIL_STRIKES,
+        (e->strikes >= BT_LE_PAIR_FAIL_STRIKES) ? ", parked until next pairing" : "");
+}
+
+/* Called once a device is actually delivering reports. Whatever trouble it had
+ * getting here is history, and holding strikes against it would park it on some
+ * later unrelated hiccup. */
+void bt_host_le_pair_ok(bt_addr_le_t *addr) {
+    struct le_pair_fail *e = bt_host_le_pair_find(addr);
+
+    if (e) {
+        printf("# %s: %02X:%02X:%02X:%02X:%02X:%02X connected, clearing %u strike(s)\n",
+            __FUNCTION__, addr->a.val[5], addr->a.val[4], addr->a.val[3],
+            addr->a.val[2], addr->a.val[1], addr->a.val[0], e->strikes);
+        memset(e, 0, sizeof(*e));
+    }
 }
 
 uint32_t bt_host_le_is_pair_failed(bt_addr_le_t *addr) {
-    uint32_t n = bt_host_le_pair_fail_len();
+    struct le_pair_fail *e = bt_host_le_pair_find(addr);
 
-    for (uint32_t i = 0; i < n; i++) {
-        if (memcmp(&le_pair_fail[i], addr, sizeof(*addr)) == 0) {
-            return 1;
-        }
-    }
-    return 0;
+    return (e && e->strikes >= BT_LE_PAIR_FAIL_STRIKES);
 }
 
 void bt_host_le_pair_fail_clear(void) {
-    if (le_pair_fail_cnt) {
-        printf("# %s: forgetting %u parked device(s)\n", __FUNCTION__,
-            (unsigned)bt_host_le_pair_fail_len());
+    uint32_t n = 0;
+
+    for (uint32_t i = 0; i < BT_LE_PAIR_FAIL_MAX; i++) {
+        if (le_pair_fail[i].used) {
+            n++;
+        }
+    }
+    if (n) {
+        printf("# %s: forgetting %u tracked device(s)\n", __FUNCTION__, (unsigned)n);
     }
     memset(le_pair_fail, 0, sizeof(le_pair_fail));
-    le_pair_fail_cnt = 0;
+    le_pair_fail_next = 0;
 }
 
 int32_t bt_host_get_new_dev(struct bt_dev **device) {
@@ -785,6 +822,20 @@ int32_t bt_host_get_next_accept_le_bdaddr(bt_addr_le_t *le_bdaddr) {
 void bt_host_bridge(struct bt_dev *device, uint8_t report_id, uint8_t *data, uint32_t len) {
     struct bt_data *bt_data = &bt_adapter.data[device->ids.id];
     uint32_t report_type = PAD;
+
+    /* Reports are flowing, so this device is working. Every controller type
+     * funnels through here, which is the one place the device is known
+     * regardless of how it identified itself; hooking the six per type init
+     * paths instead would be six chances to miss one.
+     *
+     * Upstream LBI latches this on BT_DEV_MAP_LOADED, a flag belonging to its
+     * per controller mapping feature that this tree does not carry. A
+     * dedicated flag keeps the latch without dragging that feature in. */
+    if (atomic_test_bit(&device->flags, BT_DEV_IS_BLE)
+            && !atomic_test_bit(&device->flags, BT_DEV_LE_PAIR_OK)) {
+        atomic_set_bit(&device->flags, BT_DEV_LE_PAIR_OK);
+        bt_host_le_pair_ok(&device->le_remote_bdaddr);
+    }
 
 #ifdef CONFIG_BLUERETRO_BT_TIMING_TESTS
     atomic_set_bit(&bt_flags, BT_HOST_DBG_MODE);
