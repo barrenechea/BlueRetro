@@ -130,6 +130,14 @@ menu "BlueRetro"
 
     endchoice
 
+    config BLUERETRO_HW_IBLUECONTROL
+        bool "iBlueControl SNES internal mix-in pinout"
+        depends on BLUERETRO_HW2 && BLUERETRO_SYSTEM_SNES
+        help
+            Commercial US-SNES internal adapter: GPIO16 user button,
+            ESP-driven OE on IO2/IO27, hold-style POWER_ON, swapped
+            P1/P2 sense, LED overlay {15, 4, 15, 4}.
+
     menu "Debug"
 
         config BLUERETRO_QEMU

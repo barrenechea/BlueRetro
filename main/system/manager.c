@@ -17,6 +17,7 @@
 #include "hal/gpio_hal.h"
 #include "driver/ledc.h"
 #include "esp_rom_gpio.h"
+#include "driver/rtc_io.h"
 #include "adapter/adapter.h"
 #include "adapter/config.h"
 #include "adapter/memory_card.h"
@@ -29,7 +30,11 @@
 #include "bare_metal_app_cpu.h"
 #include "manager.h"
 
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+#define BOOT_BTN_PIN 16
+#else
 #define BOOT_BTN_PIN 0
+#endif
 
 #define RESET_PIN 14
 
@@ -39,18 +44,29 @@
 
 #define POWER_OFF_ALT_PIN 12
 
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+#define SENSE_P1_PIN 36
+#define SENSE_P2_PIN 35
+#define LED_P1_PIN 15
+#define LED_P2_PIN 4
+#define LED_P3_PIN 15
+#define LED_P4_PIN 4
+#define ESP_OE_1_PIN 2
+#define ESP_OE_2_PIN 27
+#else
 #define SENSE_P1_PIN 35
 #define SENSE_P2_PIN 36
+#define LED_P1_PIN 2
+#define LED_P2_PIN 4
+#define LED_P3_PIN 12
+#define LED_P4_PIN 15
+#endif
+
 #define SENSE_P3_PIN 32
 #define SENSE_P4_PIN 33
 
 #define SENSE_P1_ALT_PIN 15
 #define SENSE_P2_ALT_PIN 34
-
-#define LED_P1_PIN 2
-#define LED_P2_PIN 4
-#define LED_P3_PIN 12
-#define LED_P4_PIN 15
 
 #define INHIBIT_CNT 200
 
@@ -124,6 +140,28 @@ static inline void set_power_on(uint32_t state) {
     }
 }
 
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+static void ibluecontrol_set_oe(uint16_t port_mask) {
+    gpio_set_level(ESP_OE_1_PIN, (port_mask & BIT(0)) ? 0 : 1);
+    gpio_set_level(ESP_OE_2_PIN, (port_mask & BIT(1)) ? 0 : 1);
+}
+
+static void ibluecontrol_enter_deep_sleep(void) {
+    set_power_on(0);
+    gpio_set_direction(LED_P1_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_P1_PIN, 0);
+    gpio_hold_en(POWER_ON_PIN);
+    gpio_hold_en(LED_P1_PIN);
+    gpio_deep_sleep_hold_en();
+    rtc_gpio_init(BOOT_BTN_PIN);
+    rtc_gpio_set_direction(BOOT_BTN_PIN, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_pullup_en(BOOT_BTN_PIN);
+    rtc_gpio_pulldown_dis(BOOT_BTN_PIN);
+    esp_sleep_enable_ext0_wakeup(BOOT_BTN_PIN, 0);
+    esp_deep_sleep_start();
+}
+#endif
+
 static inline void set_power_off(uint32_t state) {
     if (hw_config.power_pin_polarity) {
         gpio_set_level(power_off_pin, !state);
@@ -165,7 +203,9 @@ static inline uint32_t get_port_led_pin(uint32_t index) {
 }
 
 static void internal_flag_init(void) {
-#ifdef CONFIG_BLUERETRO_HW2
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+    hw_config.external_adapter = 0;
+#elif defined(CONFIG_BLUERETRO_HW2)
     if (hw_config.power_pin_polarity) {
         if (!gpio_get_level(POWER_ON_PIN) && gpio_get_level(RESET_PIN)) {
             hw_config.external_adapter = 1;
@@ -344,6 +384,9 @@ static void wired_port_hdl(void) {
     if (update && !mc_get_state()) {
         printf("# %s: Update ports state: %04X\n", __FUNCTION__, port_mask);
         wired_bare_port_cfg(port_mask);
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+        ibluecontrol_set_oe(port_mask);
+#endif
         port_state = port_mask;
         if (hw_config.ports_sense_p3_p4_as_output) {
             /* Toggle Wii classic sense line to force ctrl reinit */
@@ -545,7 +588,11 @@ static void sys_mgr_esp_restart(void) {
 
 static void sys_mgr_deep_sleep(void) {
     vTaskDelay(1000 / portTICK_PERIOD_MS);
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+    ibluecontrol_enter_deep_sleep();
+#else
     esp_deep_sleep_start();
+#endif
 }
 
 static void IRAM_ATTR sys_mgr_wired_reinit_task(void) {
@@ -582,6 +629,12 @@ void sys_mgr_cmd(uint8_t cmd) {
 
 void sys_mgr_init(uint32_t package) {
     gpio_config_t io_conf = {0};
+
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+    gpio_hold_dis(POWER_ON_PIN);
+    gpio_hold_dis(LED_P1_PIN);
+    gpio_deep_sleep_hold_dis();
+#endif
 
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_INPUT;
@@ -733,9 +786,11 @@ void sys_mgr_init(uint32_t package) {
     io_conf.pin_bit_mask = 1ULL << POWER_ON_PIN;
     gpio_config(&io_conf);
 
+#ifndef CONFIG_BLUERETRO_HW_IBLUECONTROL
     set_power_off(0);
     io_conf.pin_bit_mask = 1ULL << power_off_pin;
     gpio_config(&io_conf);
+#endif
 
     gpio_set_level(RESET_PIN, 1);
     if (hw_config.reset_pin_od) {
@@ -766,11 +821,34 @@ void sys_mgr_init(uint32_t package) {
         gpio_set_level(SENSE_P3_PIN, 1);
     }
 
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pin_bit_mask = 1ULL << ESP_OE_1_PIN;
+    gpio_config(&io_conf);
+    gpio_set_level(ESP_OE_1_PIN, 1);
+    io_conf.pin_bit_mask = 1ULL << ESP_OE_2_PIN;
+    gpio_config(&io_conf);
+    gpio_set_level(ESP_OE_2_PIN, 1);
+
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
+        sys_mgr_power_on();
+    }
+    else if (sys_mgr_get_boot_btn()) {
+        ibluecontrol_enter_deep_sleep();
+    }
+    else {
+        sys_mgr_power_on();
+    }
+#else
     /* If boot switch pressed at boot, trigger system on and goes to deep sleep */
     if (sys_mgr_get_boot_btn() && !sys_mgr_get_power()) {
         sys_mgr_power_on();
         sys_mgr_deep_sleep();
     }
+#endif
 #endif /* CONFIG_BLUERETRO_HW2 */
 
     xTaskCreatePinnedToCore(sys_mgr_task, "sys_mgr_task", 2048, NULL, 5, NULL, 0);

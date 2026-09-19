@@ -12,7 +12,9 @@
 #include "adapter/config.h"
 #include "led.h"
 
-#ifdef CONFIG_BLUERETRO_SYSTEM_SEA_BOARD
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+#define ERR_LED_PIN 12
+#elif defined(CONFIG_BLUERETRO_SYSTEM_SEA_BOARD)
 #define ERR_LED_PIN 32
 #else
 #define ERR_LED_PIN 17
@@ -62,8 +64,10 @@ void err_led_init(uint32_t package) {
     };
 
     if (package == EFUSE_RD_CHIP_VER_PKG_ESP32PICOV302) {
+#ifndef CONFIG_BLUERETRO_HW_IBLUECONTROL
         ledc_channel.gpio_num = PICO_ERR_LED_PIN;
         err_led_pin = PICO_ERR_LED_PIN;
+#endif
     }
 
     ledc_timer_config(&ledc_timer);

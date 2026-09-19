@@ -39,14 +39,22 @@ struct hw_config hw_config = {
     .ports_sense_output_od = 0,
     .ports_sense_output_polarity = 0,
     .ports_sense_p3_p4_as_output = 0,
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+    .power_pin_is_hold = 1,
+#else
     .power_pin_is_hold = 0,
+#endif
     .power_pin_od = 0,
     .power_pin_polarity = 0,
     .power_pin_pulse_ms = 20,
     .reset_pin_od = 1,
     .reset_pin_polarity = 0,
     .reset_pin_pulse_ms = 500,
+#ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
+    .sw_io0_hold_thres_ms = {3000, 6000, 10000},
+#else
     .sw_io0_hold_thres_ms = {1000, 3000, 6000},
+#endif
     .ps_ctrl_colors = {
         0xFF0000, /* Blue */
         0x0000FF, /* Red */
