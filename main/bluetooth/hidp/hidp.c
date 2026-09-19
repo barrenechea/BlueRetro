@@ -21,8 +21,8 @@ const uint8_t bt_hid_led_dev_id_map[] = {
     0x1, 0x2, 0x4, 0x8, 0x3, 0x6, 0xC
 };
 
-static const struct bt_name_type bt_name_type[] = {
 #ifndef CONFIG_BLUERETRO_GENERIC_HID_DEBUG
+static const struct bt_name_type bt_name_type[] = {
     {"PLAYSTATION(R)3", BT_PS3, BT_SUBTYPE_DEFAULT, 0},
     {"Xbox Wireless Controller", BT_HID_GENERIC, BT_SUBTYPE_DEFAULT, 0},
     {"DualSense Wireless Controller", BT_PS, BT_PS5_DS, 0},
@@ -54,8 +54,8 @@ static const struct bt_name_type bt_name_type[] = {
     {"Hyperkin Pad", BT_SW, BT_SW_HYPERKIN_ADMIRAL, 0},
     {"OUYA Game Controller", BT_HID_GENERIC, BT_SUBTYPE_DEFAULT, BIT(BT_QUIRK_OUYA)},
     {"DeviceName", BT_SW2, BT_SUBTYPE_DEFAULT, 0},
-#endif
 };
+#endif
 
 static const bt_hid_init_t bt_hid_init_list[BT_TYPE_MAX] = {
     bt_hid_generic_init, /* BT_HID_GENERIC */
@@ -85,6 +85,11 @@ static const bt_hid_cmd_t bt_hid_feedback_list[BT_TYPE_MAX] = {
 };
 
 void bt_hid_set_type_flags_from_name(struct bt_dev *device, const char* name) {
+#ifdef CONFIG_BLUERETRO_GENERIC_HID_DEBUG
+    /* bt_name_type[] does not exist in this build, so neither does the lookup. */
+    (void)device;
+    (void)name;
+#else
     for (uint32_t i = 0; i < sizeof(bt_name_type)/sizeof(*bt_name_type); i++) {
         if (strcasestr(name, bt_name_type[i].name) != NULL) {
             struct bt_data *bt_data = &bt_adapter.data[device->ids.id];
@@ -95,6 +100,7 @@ void bt_hid_set_type_flags_from_name(struct bt_dev *device, const char* name) {
             break;
         }
     }
+#endif
 }
 
 void bt_hid_init(struct bt_dev *device) {

@@ -7,7 +7,7 @@
 #include "sdkconfig.h"
 #ifdef CONFIG_BLUERETRO_SYSTEM_SEA_BOARD
 #include "soc/io_mux_reg.h"
-#include <hal/clk_gate_ll.h>
+#include "esp_private/periph_ctrl.h"
 #include "soc/rmt_struct.h"
 #include <hal/rmt_ll.h>
 #include <hal/rmt_types.h>
@@ -30,7 +30,7 @@
 typedef struct {
     struct {
         rmt_symbol_word_t data32[SOC_RMT_MEM_WORDS_PER_CHANNEL];
-    } chan[SOC_RMT_CHANNELS_PER_GROUP];
+    } chan[RMT_LL_GET(CHANS_PER_INST)];
 } rmt_mem_t;
 
 // RMTMEM address is declared in <target>.peripherals.ld
@@ -90,7 +90,10 @@ void sea_init(void) {
     }
 
     /* Setup RMT peripheral for GBAHD comport */
-    periph_ll_enable_clk_clear_rst(PERIPH_RMT_MODULE);
+    PERIPH_RCC_ATOMIC() {
+        rmt_ll_enable_bus_clock(0, true);
+        rmt_ll_reset_register(0);
+    }
 
     RMT.apb_conf.fifo_mask = 1;
     RMT.conf_ch[0].conf0.div_cnt = 40; /* 80MHz (APB CLK) / 40 = 0.5us TICK */;
@@ -114,8 +117,8 @@ void sea_init(void) {
 
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[GBAHD_COM_PIN], PIN_FUNC_GPIO);
     gpio_set_direction_iram(GBAHD_COM_PIN, GPIO_MODE_OUTPUT);
-    gpio_matrix_out(GBAHD_COM_PIN, RMT_SIG_OUT0_IDX, 0, 0);
-    gpio_matrix_in(GBAHD_COM_PIN, RMT_SIG_IN0_IDX, 0);
+    esp_rom_gpio_connect_out_signal(GBAHD_COM_PIN, RMT_SIG_OUT0_IDX, 0, 0);
+    esp_rom_gpio_connect_in_signal(GBAHD_COM_PIN, RMT_SIG_IN0_IDX, 0);
 
     /* No RX, just set in good state */
     rmt_ll_rx_enable(&RMT, 0, 0);

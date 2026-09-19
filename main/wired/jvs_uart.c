@@ -9,10 +9,9 @@
 #if defined (CONFIG_BLUERETRO_SYSTEM_JVS)
 #include <string.h>
 #include <hal/clk_gate_ll.h>
-#include <soc/uart_periph.h>
 #include <hal/uart_ll.h>
+#include <soc/io_mux_reg.h>
 #include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
 #include "esp_private/esp_clk.h"
 #include "zephyr/types.h"
 #include "tools/util.h"
@@ -311,13 +310,13 @@ void jvs_init(uint32_t package) {
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[JVS_TX_PIN], PIN_FUNC_GPIO);
     gpio_set_direction_iram(JVS_TX_PIN, GPIO_MODE_INPUT_OUTPUT);
     gpio_set_level_iram(JVS_TX_PIN, 1);
-    gpio_matrix_out(JVS_TX_PIN, U1TXD_OUT_IDX, false, false);
+    esp_rom_gpio_connect_out_signal(JVS_TX_PIN, U1TXD_OUT_IDX, false, false);
 
     /* JVS_RX is input */
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[JVS_RX_PIN], PIN_FUNC_GPIO);
     gpio_set_pull_mode_iram(JVS_RX_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(JVS_RX_PIN, GPIO_MODE_INPUT);
-    gpio_matrix_in(JVS_RX_PIN, U1RXD_IN_IDX, false);
+    esp_rom_gpio_connect_in_signal(JVS_RX_PIN, U1RXD_IN_IDX, false);
 
     //Configure UART
     UART1.int_ena.val &= (~0x7ffff);

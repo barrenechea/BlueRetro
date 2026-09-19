@@ -1,13 +1,17 @@
 /*
- * SPDX-FileCopyrightText: 2015-2024 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2015-2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Vendored from ESP-IDF startup.c so BlueRetro can start the APP CPU as
+ * bare metal before heap_caps_init(). See init_app_cpu_baremetal() in
+ * bare_metal_app_cpu.c. Constructors use __libc_init_array() as IDF 6 does.
  */
 
 #include <stdint.h>
 #include <string.h>
 
-#include "esp_attr.h"
+#include "esp_private/esp_system_attr.h"
 #include "esp_err.h"
 #include "esp_compiler.h"
 #include "esp_macros.h"
@@ -69,61 +73,16 @@ const sys_startup_fn_t g_startup_fn[1] = { start_cpu0 };
 #endif
 #endif
 
-static const char* TAG = "cpu_start";
+ESP_LOG_ATTR_TAG(TAG, "cpu_start");
+
+/* declare the start and stop symbols surrounding the array of init functions
+ * registered by calling the system init function macros */
+_SECTION_ATTR_SYMBOL_DECL_GENERIC(esp_system_init_fn_t, esp_sys_init_fn)
 
 /**
- * Xtensa gcc is configured to emit a .ctors section, RISC-V gcc is configured with --enable-initfini-array
- * so it emits an .init_array section instead.
- * But the init_priority sections will be sorted for iteration in ascending order during startup.
- * The rest of the init_array sections is sorted for iteration in descending order during startup, however.
- * Hence a different section is generated for the init_priority functions which is looped
- * over in ascending direction instead of descending direction.
- * The RISC-V-specific behavior is dependent on the linker script ld/esp32c3/sections.ld.in.
- */
-__attribute__((no_sanitize_undefined)) /* TODO: IDF-8133 */
-static void do_global_ctors(void)
-{
-#if __riscv
-    extern void (*__init_priority_array_start)(void);
-    extern void (*__init_priority_array_end)(void);
-#endif
-
-    extern void (*__init_array_start)(void);
-    extern void (*__init_array_end)(void);
-
-#ifdef CONFIG_COMPILER_CXX_EXCEPTIONS
-    struct object {
-        long placeholder[ 10 ];
-    };
-    void __register_frame_info(const void *begin, struct object * ob);
-    extern char __eh_frame[];
-
-    static struct object ob;
-    __register_frame_info(__eh_frame, &ob);
-#endif // CONFIG_COMPILER_CXX_EXCEPTIONS
-
-    void (**p)(void);
-
-#if __riscv
-    for (p = &__init_priority_array_start; p < &__init_priority_array_end; ++p) {
-        ESP_LOGD(TAG, "calling init function: %p", *p);
-        (*p)();
-    }
-#endif
-
-    ESP_COMPILER_DIAGNOSTIC_PUSH_IGNORE("-Wanalyzer-out-of-bounds")
-    for (p = &__init_array_end - 1; p >= &__init_array_start; --p) {
-        ESP_LOGD(TAG, "calling init function: %p", *p);
-        (*p)();
-    }
-    ESP_COMPILER_DIAGNOSTIC_POP("-Wanalyzer-out-of-bounds")
-
-}
-
-/**
- * @brief Call component init functions defined using ESP_SYSTEM_INIT_Fn macros.
+ * @brief Call component init functions defined using the system init function macros.
  * The esp_system_init_fn_t structures describing these functions are collected into
- * an array [_esp_system_init_fn_array_start, _esp_system_init_fn_array_end) by the
+ * an array [_esp_sys_init_fn_start, _esp_sys_init_fn_end) by the
  * linker. The functions are sorted by their priority value.
  * The sequence of the init function calls (sorted by priority) is documented in
  * system_init_fn.txt file.
@@ -132,13 +91,10 @@ static void do_global_ctors(void)
 __attribute__((no_sanitize_undefined)) /* TODO: IDF-8133 */
 static void do_system_init_fn(uint32_t stage_num)
 {
-    extern esp_system_init_fn_t _esp_system_init_fn_array_start;
-    extern esp_system_init_fn_t _esp_system_init_fn_array_end;
-
-    esp_system_init_fn_t *p;
+    const esp_system_init_fn_t *p;
 
     int core_id = esp_cpu_get_core_id();
-    for (p = &_esp_system_init_fn_array_start; p < &_esp_system_init_fn_array_end; ++p) {
+    for (p = _SECTION_START(esp_sys_init_fn); p < _SECTION_END(esp_sys_init_fn); ++p) {
         if (p->stage == stage_num && (p->cores & BIT(core_id)) != 0) {
             // During core init, stdout is not initialized yet, so use early logging.
             ESP_EARLY_LOGD(TAG, "calling init function: %p on core: %d", p->fn, core_id);
@@ -166,7 +122,7 @@ static void  esp_startup_start_app_other_cores_default(void)
 /* This function has to be in IRAM, as while it is running on CPU1, CPU0 may do some flash operations
  * (e.g. initialize the core dump), which means that cache will be disabled.
  */
-static void IRAM_ATTR start_cpu_other_cores_default(void)
+static void ESP_SYSTEM_IRAM_ATTR start_cpu_other_cores_default(void)
 {
     do_system_init_fn(ESP_SYSTEM_INIT_STAGE_SECONDARY);
 
@@ -212,6 +168,8 @@ static void do_secondary_init(void)
 
 static void start_cpu0_default(void)
 {
+    extern void __libc_init_array(void);
+
 #ifdef BLUERETRO
     // Init Core1
     init_app_cpu_baremetal();
@@ -219,10 +177,16 @@ static void start_cpu0_default(void)
 #endif
 
     // Initialize core components and services.
+    // Operations that needs the cache to be disabled have to be done here.
     do_core_init();
 
     // Execute constructors.
-    do_global_ctors();
+    __libc_init_array();
+
+    /* ----------------------------------Separator-----------------------------
+     * After this stage, other CPU start running with the cache, however the scheduler (and ipc service) is not available.
+     * Don't touch the cache/MMU until the OS is up.
+     */
 
     // Execute init functions of other components; blocks
     // until all cores finish (when !CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE).

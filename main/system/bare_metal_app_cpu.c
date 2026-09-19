@@ -34,7 +34,7 @@
 #include <esp32/rom/uart.h>
 #include <esp32/rom/cache.h>
 #include <xt_instr_macros.h>
-#include <xtensa/config/specreg.h>
+#include <xtensa/xt_specreg.h>
 #include <xtensa_api.h>
 #include <xtensa/config/core.h>
 
@@ -107,7 +107,7 @@ static inline void cpu_init_hwloop(void)
 {
 #if XCHAL_ERRATUM_572
     uint32_t memctl = XCHAL_CACHE_MEMCTL_DEFAULT;
-    WSR(MEMCTL, memctl);
+    WSR(XT_REG_MEMCTL, memctl);
 #endif // XCHAL_ERRATUM_572
 }
 
@@ -144,6 +144,7 @@ static void IRAM_ATTR app_cpu_init()
 #endif
 
     app_cpu_initial_start = 1;
+    __asm__ __volatile__("memw" ::: "memory");
 
     // This will halt the CPU until it is needed
     DPORT_REG_CLR_BIT(DPORT_APPCPU_CTRL_B_REG, DPORT_APPCPU_CLKGATE_EN);
@@ -208,6 +209,9 @@ int32_t start_app_cpu(wired_init_t user)
     printf("# APP CPU STACK PTR: %08lX\n", (uint32_t)app_cpu_stack_ptr);
 #endif
 
+    // Same stall bits as init: unicore IDF may have left RUNSTALL/RTC stall set.
+    esp_cpu_unstall(1);
+    DPORT_CLEAR_PERI_REG_MASK(DPORT_APPCPU_CTRL_C_REG, DPORT_APPCPU_RUNSTALL);
     DPORT_SET_PERI_REG_MASK(DPORT_APPCPU_CTRL_B_REG, DPORT_APPCPU_CLKGATE_EN);
     return 0;
 }
@@ -223,8 +227,9 @@ int32_t start_app_cpu(wired_init_t user)
  */
 void init_app_cpu_baremetal()
 {
-    // just in case...
-    // disable the clock gate of the app core
+    // Halt CPU1 first. This is also reached at runtime from sys_mgr's wired
+    // reinit, where CPU1 is executing app_cpu_main(); its interrupt matrix must
+    // not be rewritten underneath it.
     DPORT_REG_CLR_BIT(DPORT_APPCPU_CTRL_B_REG, DPORT_APPCPU_CLKGATE_EN);
 
     app_cpu_initial_start = 0;
@@ -236,17 +241,26 @@ void init_app_cpu_baremetal()
         intr_matrix_set(1, i, ETS_INVALID_INUM);
     }
 
-    // Reset the CPU
-    DPORT_REG_SET_BIT(DPORT_APPCPU_CTRL_A_REG, DPORT_APPCPU_RESETTING);
-    DPORT_REG_CLR_BIT(DPORT_APPCPU_CTRL_A_REG, DPORT_APPCPU_RESETTING);
-
-    // Load the entry vector
-    DPORT_WRITE_PERI_REG(DPORT_APPCPU_CTRL_D_REG, ((uint32_t)&app_cpu_init));
-
-    // And turn the clock on
+    // IDF 6.x unicore call_start_cpu0 clock-gates CPU1 in system_early_init()
+    // ("Single core mode") and never unstalls it, because start_other_core() -
+    // the only place that does - is not called. Turning the clock back on alone
+    // leaves CPU1 stalled, so the wait below never completes and app_main never
+    // runs. Cache stays off; CPU1 runs from IRAM/ROM only.
+    //
+    // This is the body of cpu_utility_ll_enable_clock_and_reset_app_cpu(),
+    // spelled out. That helper is wrapped in `if (!CLKGATE_EN)` so IDF does not
+    // clobber OpenOCD breakpoints, which would make it silently do nothing
+    // whenever the clock happened to be on - correctness here would then depend
+    // on the CLR_BIT above, several statements and a loop away. We always want
+    // the reset, so do it unconditionally and keep it local.
+    esp_cpu_unstall(1);
     DPORT_SET_PERI_REG_MASK(DPORT_APPCPU_CTRL_B_REG, DPORT_APPCPU_CLKGATE_EN);
+    DPORT_CLEAR_PERI_REG_MASK(DPORT_APPCPU_CTRL_C_REG, DPORT_APPCPU_RUNSTALL);
+    DPORT_SET_PERI_REG_MASK(DPORT_APPCPU_CTRL_A_REG, DPORT_APPCPU_RESETTING);
+    DPORT_CLEAR_PERI_REG_MASK(DPORT_APPCPU_CTRL_A_REG, DPORT_APPCPU_RESETTING);
 
-    // finally wait for the CPU to start
-    while(!app_cpu_initial_start){}
+    ets_set_appcpu_boot_addr((uint32_t)&app_cpu_init);
+
+    while (!app_cpu_initial_start) {}
 }
 

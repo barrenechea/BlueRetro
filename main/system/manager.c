@@ -13,7 +13,7 @@
 #include <esp_system.h>
 #include <soc/efuse_reg.h>
 #include "driver/gpio.h"
-#include "hal/ledc_hal.h"
+#include "hal/ledc_periph.h"
 #include "hal/gpio_hal.h"
 #include "driver/ledc.h"
 #include "esp_rom_gpio.h"
@@ -29,6 +29,23 @@
 #include "system/led.h"
 #include "bare_metal_app_cpu.h"
 #include "manager.h"
+
+/* GPIO matrix signal index for one LEDC channel.
+ *
+ * ESP-IDF v6.1 reshaped ledc_signal_conn_t: the outer index is the LEDC group
+ * rather than the speed mode, and the per-channel output signal is an array
+ * rather than a base index the channel number is added to. ESP32 has a single
+ * group, and the values are the same LEDC_{HS,LS}_SIG_OUTn_IDX either way, so
+ * only the spelling changed.
+ *
+ * ledc_set_pin() is the supported way to do this and would not have needed
+ * touching here, but it validates arguments and registers the pin in the
+ * driver's per-channel bookkeeping - a behavioural change, not a rename, and
+ * these paths deliberately poke the GPIO matrix directly. Worth revisiting
+ * separately. */
+static inline int ledc_sig_out_idx(ledc_mode_t mode, ledc_channel_t chan) {
+    return ledc_periph_signal[0].speed_mode[mode].sig_out_idx[chan];
+}
 
 #ifdef CONFIG_BLUERETRO_HW_IBLUECONTROL
 #define BOOT_BTN_PIN 16
@@ -191,10 +208,10 @@ static inline void set_sense_out(uint32_t pin, uint32_t state) {
 
 static inline void set_port_led(uint32_t index, uint32_t state) {
     if (state) {
-        esp_rom_gpio_connect_out_signal(led_list[index], ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_1, 0, 0);
+        esp_rom_gpio_connect_out_signal(led_list[index], ledc_sig_out_idx(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1), 0, 0);
     }
     else {
-        esp_rom_gpio_connect_out_signal(led_list[index], ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_2, 0, 0);
+        esp_rom_gpio_connect_out_signal(led_list[index], ledc_sig_out_idx(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2), 0, 0);
     }
 }
 
@@ -231,7 +248,7 @@ static void port_led_pulse(uint32_t pin) {
     if (pin) {
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[pin], PIN_FUNC_GPIO);
         gpio_set_direction(pin, GPIO_MODE_OUTPUT);
-        esp_rom_gpio_connect_out_signal(pin, ledc_periph_signal[LEDC_HIGH_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_0, 0, 0);
+        esp_rom_gpio_connect_out_signal(pin, ledc_sig_out_idx(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0), 0, 0);
     }
 }
 
@@ -245,16 +262,16 @@ static void set_leds_as_btn_status(uint8_t state) {
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[pin], PIN_FUNC_GPIO);
         gpio_set_direction(pin, GPIO_MODE_OUTPUT);
         if (state) {
-            esp_rom_gpio_connect_out_signal(pin, ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_1, 0, 0);
+            esp_rom_gpio_connect_out_signal(pin, ledc_sig_out_idx(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1), 0, 0);
         }
     }
 
     /* Use error LED as well */
     if (state) {
-        esp_rom_gpio_connect_out_signal(err_led_pin, ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_1, 0, 0);
+        esp_rom_gpio_connect_out_signal(err_led_pin, ledc_sig_out_idx(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1), 0, 0);
     }
     else {
-        esp_rom_gpio_connect_out_signal(err_led_pin, ledc_periph_signal[LEDC_HIGH_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_0, 0, 0);
+        esp_rom_gpio_connect_out_signal(err_led_pin, ledc_sig_out_idx(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0), 0, 0);
     }
 }
 
@@ -771,7 +788,7 @@ void sys_mgr_init(uint32_t package) {
         if (i < hw_config.port_cnt) {
             /* Can't use GPIO mode on port LED as some wired driver overwrite whole GPIO port */
             /* Use unused LEDC channel 2 to force output low */
-            esp_rom_gpio_connect_out_signal(led_list[i], ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_2, 0, 0);
+            esp_rom_gpio_connect_out_signal(led_list[i], ledc_sig_out_idx(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2), 0, 0);
         }
     }
 
@@ -833,7 +850,7 @@ void sys_mgr_init(uint32_t package) {
     gpio_config(&io_conf);
     gpio_set_level(ESP_OE_2_PIN, 1);
 
-    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
+    if (esp_sleep_get_wakeup_causes() & BIT(ESP_SLEEP_WAKEUP_EXT0)) {
         sys_mgr_power_on();
     }
     else if (sys_mgr_get_boot_btn()) {

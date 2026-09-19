@@ -155,7 +155,9 @@ void ws_srv_init(void) {
 
     phy_config.autonego_timeout_ms = 100;
     s_mac = esp_eth_mac_new_openeth(&mac_config);
-    s_phy = esp_eth_phy_new_dp83848(&phy_config);
+    /* QEMU's openeth has no real PHY, and esp_eth dropped the DP83848 driver
+     * in v6.0. The generic driver is the in-tree replacement. */
+    s_phy = esp_eth_phy_new_generic(&phy_config);
 
     /* Install Ethernet driver */
     esp_eth_config_t config = ETH_DEFAULT_CONFIG(s_mac, s_phy);

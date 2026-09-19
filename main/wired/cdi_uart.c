@@ -8,10 +8,9 @@
 #include "sdkconfig.h"
 #if defined (CONFIG_BLUERETRO_SYSTEM_CDI)
 #include <hal/clk_gate_ll.h>
-#include <soc/uart_periph.h>
 #include <hal/uart_ll.h>
+#include <soc/io_mux_reg.h>
 #include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
 #include "esp_private/esp_clk.h"
 #include "zephyr/types.h"
 #include "tools/util.h"
@@ -300,7 +299,7 @@ void cdi_uart_init(uint32_t package) {
 
         /* RTS */
         io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.intr_type = GPIO_PIN_INTR_ANYEDGE;
+        io_conf.intr_type = GPIO_INTR_ANYEDGE;
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
         io_conf.pin_bit_mask = 1ULL << p->rts_pin;
@@ -309,7 +308,7 @@ void cdi_uart_init(uint32_t package) {
         /* Data */
         gpio_set_direction_iram(p->data_pin, GPIO_MODE_OUTPUT);
         gpio_set_level_iram(p->data_pin, 1);
-        gpio_matrix_out(p->data_pin, p->data_sig, false, false);
+        esp_rom_gpio_connect_out_signal(p->data_pin, p->data_sig, false, false);
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->data_pin], PIN_FUNC_GPIO);
 
         periph_ll_enable_clk_clear_rst(p->uart_mod);

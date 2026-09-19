@@ -16,6 +16,7 @@
 #include <xtensa/coreasm.h>
 #include <xtensa/corebits.h>
 #include <xtensa/config/system.h>
+#include <xtensa/xt_specreg.h>
 #include <xtensa_context.h>
 #include "freertos/xtensa_rtos.h"
 #include "esp_private/panic_reason.h"
@@ -46,11 +47,11 @@ _l5_intr_stack:
     .align      4
 xt_highint5:
     /* See if we're here for the dport access interrupt */
-    rsr     a0, INTERRUPT
+    rsr     a0, XT_REG_INTERRUPT
     extui   a0, a0, 31, 1
     bnez    a0, .handle_dport_access_int
 
-    rsr     a0, EXCSAVE_5                   /* restore a0 */
+    rsr     a0, XT_REG_EXCSAVE_5            /* restore a0 */
     rfi     5
 
     .align      4
@@ -91,7 +92,7 @@ xt_highint5:
     l32i    a3, a2, 0
     beqz    a3, .check_dport_access_end
 
-    wsr     a4, PS                                   /* restore iterrupt level */
+    wsr     a4, XT_REG_PS                            /* restore interrupt level */
     /* Done. Restore registers and return. */
     movi    a0, _l5_intr_stack
     l32i    a2, a0, L5_INTR_A2_OFFSET
@@ -99,7 +100,7 @@ xt_highint5:
     l32i    a4, a0, L5_INTR_A4_OFFSET
     rsync                                   /* ensure register restored */
 
-    rsr     a0, EXCSAVE_5                   /* restore a0 */
+    rsr     a0, XT_REG_EXCSAVE_5            /* restore a0 */
     rfi     5
 
 /* The linker has no reason to link in this file; all symbols it exports are already defined

@@ -8,6 +8,7 @@ entries:
     gpio (noflash)
     intr (noflash)
     led (noflash)
+    bare_metal_app_cpu (noflash)
     delay (noflash)
     detect (noflash)
     wired_bare (noflash)

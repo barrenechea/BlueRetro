@@ -38,6 +38,11 @@ jobs:
     - name: Build with ESP-IDF
       shell: bash
       run: |
+        # The workspace is checked out by the runner user, but this container
+        # runs as root, so git rejects the repo as "dubious ownership" and every
+        # git describe below yields an empty string - silently shipping firmware
+        # with no version in esp_app_desc, and unversioned artifact names.
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
         . $IDF_PATH/export.sh
         echo "br_version=$(git describe --always --tags --dirty)" >> $GITHUB_ENV
         rm -fr build

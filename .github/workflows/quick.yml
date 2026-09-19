@@ -15,17 +15,22 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/darthcloud/idf-blueretro:v5.5.0_2024-12-02
+      image: espressif/idf:v6.1
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: recursive
         fetch-depth: 0
     - name: Build with ESP-IDF
       shell: bash
       run: |
+        # The workspace is checked out by the runner user, but this container
+        # runs as root, so git rejects the repo as "dubious ownership" and every
+        # git describe below yields an empty string - silently shipping firmware
+        # with no version in esp_app_desc, and unversioned artifact names.
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
         . $IDF_PATH/export.sh
         echo "br_version=$(git describe --always --tags --dirty)" >> $GITHUB_ENV
         echo "$(git describe --always --tags --dirty) ${{ github.event.inputs.hw_version }} ${{ github.event.inputs.br_config }}" | cut -c -31 > version.txt
@@ -38,7 +43,7 @@ jobs:
         mkdir ota
         mv ota_data_initial.bin ota/
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ env.br_version }}_${{ github.event.inputs.hw_version }}_${{ github.event.inputs.br_config }}
         path: |

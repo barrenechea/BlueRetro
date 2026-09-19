@@ -9,14 +9,13 @@
 #include <string.h>
 #include "soc/io_mux_reg.h"
 #include "esp_private/periph_ctrl.h"
-#include <soc/i2c_periph.h>
+#include <soc/i2c_reg.h>
+#include <soc/interrupts.h>
 #include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
 #include "hal/i2c_ll.h"
 #include "hal/clk_gate_ll.h"
 #include "hal/misc.h"
 #include "driver/gpio.h"
-#include "driver/i2c.h"
 #include "system/intr.h"
 #include "system/gpio.h"
 #include "system/delay.h"
@@ -58,7 +57,6 @@ struct wii_ctrl_port {
     uint8_t sda_in_sig;
     uint8_t scl_out_sig;
     uint8_t scl_in_sig;
-    uint8_t module;
     uint8_t *reg;
     uint8_t tmp[32];
     wiimote_key key;
@@ -116,7 +114,6 @@ static struct wii_ctrl_port wii_ctrl_ports[WII_PORT_MAX] = {
         .sda_in_sig = I2CEXT0_SDA_IN_IDX,
         .scl_out_sig = I2CEXT0_SCL_OUT_IDX,
         .scl_in_sig = I2CEXT0_SCL_IN_IDX,
-        .module = PERIPH_I2C0_MODULE,
         .reg = wii_registers[0],
     },
     {
@@ -131,7 +128,6 @@ static struct wii_ctrl_port wii_ctrl_ports[WII_PORT_MAX] = {
         .sda_in_sig = I2CEXT1_SDA_IN_IDX,
         .scl_out_sig = I2CEXT1_SCL_OUT_IDX,
         .scl_in_sig = I2CEXT1_SCL_IN_IDX,
-        .module = PERIPH_I2C1_MODULE,
         .reg = wii_registers[1],
     },
 };
@@ -308,18 +304,24 @@ void wii_i2c_init(uint32_t package) {
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->sda_pin], PIN_FUNC_GPIO);
         gpio_set_direction_iram(p->sda_pin, GPIO_MODE_INPUT_OUTPUT_OD);
         gpio_set_pull_mode_iram(p->sda_pin, GPIO_PULLUP_ONLY);
-        gpio_matrix_out(p->sda_pin, p->sda_out_sig, false, false);
-        gpio_matrix_in(p->sda_pin, p->sda_in_sig, false);
+        esp_rom_gpio_connect_out_signal(p->sda_pin, p->sda_out_sig, false, false);
+        esp_rom_gpio_connect_in_signal(p->sda_pin, p->sda_in_sig, false);
 
         /* Clock */
         gpio_set_level_iram(p->scl_pin, 1);
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->scl_pin], PIN_FUNC_GPIO);
         gpio_set_direction_iram(p->scl_pin, GPIO_MODE_INPUT_OUTPUT_OD);
-        gpio_matrix_out(p->scl_pin, p->scl_out_sig, false, false);
-        gpio_matrix_in(p->scl_pin, p->scl_in_sig, false);
+        esp_rom_gpio_connect_out_signal(p->scl_pin, p->scl_out_sig, false, false);
+        esp_rom_gpio_connect_in_signal(p->scl_pin, p->scl_in_sig, false);
         gpio_set_pull_mode_iram(p->scl_pin, GPIO_PULLUP_ONLY);
 
-        periph_ll_enable_clk_clear_rst(p->module);
+        /* PERIPH_I2C0/1_MODULE were removed from periph_defs.h in ESP-IDF v6.0
+         * along with the legacy I2C driver. Bus clock and reset move to the LL,
+         * the same way nsi.c and sea_io.c already do it for RMT. */
+        PERIPH_RCC_ATOMIC() {
+            i2c_ll_enable_bus_clock(p->id, true);
+            i2c_ll_reset_register(p->id);
+        }
 
         p->hw->int_ena.val &= I2C_LL_INTR_MASK;
         p->hw->int_clr.val = I2C_LL_INTR_MASK;

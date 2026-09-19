@@ -8,7 +8,6 @@
 #include "esp_private/periph_ctrl.h"
 #include <soc/spi_periph.h>
 #include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
 #include "hal/clk_gate_ll.h"
 #include "driver/gpio.h"
 #include "system/intr.h"
@@ -297,36 +296,36 @@ void snes_spi_init(uint32_t package) {
 
         /* Latch */
         io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.intr_type = GPIO_PIN_INTR_POSEDGE;
+        io_conf.intr_type = GPIO_INTR_POSEDGE;
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
         io_conf.pin_bit_mask = 1ULL << p->latch_pin;
         gpio_config_iram(&io_conf);
-        gpio_matrix_in(p->latch_pin, p->latch_sig, false);
+        esp_rom_gpio_connect_in_signal(p->latch_pin, p->latch_sig, false);
 
         /* CIPO */
         gpio_set_level_iram(p->cipo_pin, 1);
         gpio_set_direction_iram(p->cipo_pin, GPIO_MODE_OUTPUT);
-        gpio_matrix_out(p->cipo_pin, p->cipo_sig, false, false);
+        esp_rom_gpio_connect_out_signal(p->cipo_pin, p->cipo_sig, false, false);
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->cipo_pin], PIN_FUNC_GPIO);
 
         /* COPI */
         io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
         io_conf.pin_bit_mask = 1ULL << p->copi_pin;
         gpio_config_iram(&io_conf);
-        gpio_matrix_in(p->copi_pin, p->copi_sig, false);
+        esp_rom_gpio_connect_in_signal(p->copi_pin, p->copi_sig, false);
 
         /* Clock */
         io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
         io_conf.pin_bit_mask = 1ULL << p->clk_pin;
         gpio_config_iram(&io_conf);
-        gpio_matrix_in(p->clk_pin, p->clk_sig, true);
+        esp_rom_gpio_connect_in_signal(p->clk_pin, p->clk_sig, true);
 
         periph_ll_enable_clk_clear_rst(p->spi_mod);
 

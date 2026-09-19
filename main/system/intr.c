@@ -6,6 +6,8 @@
 #include <stdbool.h>
 #include <esp32/rom/ets_sys.h>
 #include <esp_cpu.h>
+#include <xt_instr_macros.h>
+#include <xtensa/xt_specreg.h>
 #include "intr.h"
 
 #define INT_MUX_DISABLED_INTNO 6
@@ -18,15 +20,14 @@
 */
 static inline uint32_t xt_int_disable_mask(uint32_t newmask)
 {
-    uint32_t oldint;
-    asm volatile (
-        "movi %0,0\n"
-        "xsr %0,INTENABLE\n"    //disable all ints first
-        "rsync\n"
-        "and a3,%0,%1\n"        //mask ints that need disabling
-        "wsr a3,INTENABLE\n"    //write back
-        "rsync\n"
-        :"=&r"(oldint):"r"(newmask):"a3");
+    uint32_t oldint = 0;
+    uint32_t masked;
+
+    XSR(XT_REG_INTENABLE, oldint);
+    asm volatile ("rsync");
+    masked = oldint & newmask;
+    WSR(XT_REG_INTENABLE, masked);
+    asm volatile ("rsync");
 
     return oldint;
 }
@@ -39,14 +40,13 @@ static inline uint32_t xt_int_disable_mask(uint32_t newmask)
 */
 static inline void xt_int_enable_mask(uint32_t newmask)
 {
-    asm volatile (
-        "movi a3,0\n"
-        "xsr a3,INTENABLE\n"
-        "rsync\n"
-        "or a3,a3,%0\n"
-        "wsr a3,INTENABLE\n"
-        "rsync\n"
-        ::"r"(newmask):"a3");
+    uint32_t oldint = 0;
+
+    XSR(XT_REG_INTENABLE, oldint);
+    asm volatile ("rsync");
+    oldint |= newmask;
+    WSR(XT_REG_INTENABLE, oldint);
+    asm volatile ("rsync");
 }
 
 int32_t intexc_alloc_iram(uint32_t source, uint32_t intr_num, XT_INTEXC_HOOK handler) {
