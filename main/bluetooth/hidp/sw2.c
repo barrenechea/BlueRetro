@@ -374,16 +374,34 @@ static bool bt_hid_sw2_gate_report(struct bt_dev *device) {
 void bt_hid_sw2_hdlr(struct bt_dev *device, uint16_t att_handle, uint8_t *data, uint32_t len) {
     switch (att_handle) {
         case BT_HIDP_SW2_REPORT_TYPE1_ATT_HDL:
+        {
+            struct bt_data *bt_data = &bt_adapter.data[device->ids.id];
+
+            /* HD-rumble keepalive. A Pro 2 or Joy-Con 2 expects a steady stream of
+             * output frames and drops the link (HCI 0x08, supervision timeout) if
+             * it stops; bluepad32 sends an idle LRA packet every 5 ms and warns
+             * explicitly that the link times out without it. Upstream only sent
+             * this when the user had rumble enabled, so turning rumble off took the
+             * pad down with it. The idle frame is what the buffer already holds
+             * when nothing is rumbling, so sending it unconditionally costs one
+             * ATT write per input report and nothing else.
+             *
+             * The NSO GameCube pad is excluded: HD-rumble writes power its motor
+             * off, and bluepad32 likewise excludes PID 0x2073 from its keepalive.
+             *
+             * Sent before the calibration gate below, deliberately. The gate exists
+             * to suppress *input*, and dropping an input report must not also drop
+             * the link maintenance that keeps the controller connected. */
+            if (bt_data && bt_data->base.pid != SW2_GC_PID) {
+                bt_hid_cmd_sw2_out(device, bt_data->base.output);
+            }
+
             if (!bt_hid_sw2_gate_report(device)) {
                 break;
             }
             bt_host_bridge(device, 1, data, len);
-            struct bt_data *bt_data = &bt_adapter.data[device->ids.id];
-            if (bt_data && bt_data->base.pid != SW2_GC_PID
-                    && config.out_cfg[device->ids.out_idx].acc_mode & ACC_RUMBLE) {
-                bt_hid_cmd_sw2_out(device, bt_data->base.output);
-            }
             break;
+        }
         case BT_HIDP_SW2_REPORT_TYPE2_ATT_HDL:
             if (!bt_hid_sw2_gate_report(device)) {
                 break;
