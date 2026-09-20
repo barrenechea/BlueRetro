@@ -70,10 +70,15 @@ static const struct ctrl_meta sw2_gc_axes_meta[ADAPTER_MAX_AXES] =
     /* NSO GC controller analog triggers idle a few counts above the assumed
      * neutral of 30, leaking ~3-7 / 200 into the wired output. A small static
      * deadzone here suppresses the noise without affecting partial-press
-     * feel (full range is ~195 counts, so 9 is ~4.5% -- just over the
-     * observed noise floor). */
-    {.neutral = 30, .abs_max = 195, .abs_min = 0x00, .deadzone = 9},
-    {.neutral = 30, .abs_max = 195, .abs_min = 0x00, .deadzone = 9},
+     * feel (full range is ~195 counts, so 8 is ~4%).
+     *
+     * adapter.c tests `abs_src_value > deadzone`, so 7 would already suppress
+     * the whole observed 3-7 noise band; 8 buys one count of margin. Upstream
+     * Last-Colossi uses 9. The smaller value is preferred because this is
+     * added on top of the user's configured percentage deadzone, so every
+     * count here is one the user cannot tune away. */
+    {.neutral = 30, .abs_max = 195, .abs_min = 0x00, .deadzone = 8},
+    {.neutral = 30, .abs_max = 195, .abs_min = 0x00, .deadzone = 8},
 };
 
 struct sw2_map {
