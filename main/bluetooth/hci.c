@@ -1151,6 +1151,7 @@ static void bt_hci_le_meta_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                 uint8_t *end = data + le_adv_report->adv_info[0].length;
                 uint8_t len, type;
                 uint16_t value;
+                uint16_t adv_pid = 0;
 
                 printf("# BT_HCI_EVT_LE_ADVERTISING_REPORT\n");
 
@@ -1182,8 +1183,13 @@ static void bt_hci_le_meta_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                             /* Manufacturer Specific Data */
                             value = *(uint16_t *)&data[1];
                             if (value == 0x0553) {
+                                /* ndeadly numbers the manufacturer data from the
+                                 * company ID byte; data[] here starts one earlier, at
+                                 * the AD type byte, so data[n + 1] is his offset n.
+                                 * VID sits at his 0x5, PID at his 0x7. */
                                 uint16_t vid = *(uint16_t *)&data[6];
                                 if (vid == 0x057e) {
+                                    adv_pid = *(uint16_t *)&data[8];
                                     goto connect;
                                 }
                             }
@@ -1204,6 +1210,7 @@ connect:
                     if (device) {
                         bt_host_reset_dev(device);
                         memcpy((uint8_t *)&device->le_remote_bdaddr, (uint8_t *)&le_adv_report->adv_info[0].addr, sizeof(device->le_remote_bdaddr));
+                        device->le_adv_pid = adv_pid;
                         device->ids.type = BT_HID_GENERIC;
                         bt_l2cap_init_dev_scid(device);
                         atomic_set_bit(&device->flags, BT_DEV_DEVICE_FOUND);

@@ -40,6 +40,21 @@ enum {
 };
 
 static struct bt_hid_sw2_ctrl_calib calib[BT_MAX_DEV] = {0};
+
+/* Our half of the 0x15/0x04 key exchange (A1). A build-time constant, as it is
+ * upstream, so it can be both sent and folded with the controller's reply. */
+static const uint8_t sw2_pairing_a1[16] = {
+    0xea, 0xbd, 0x47, 0x13, 0x89, 0x35, 0x42, 0xc6,
+    0x79, 0xee, 0x07, 0xf2, 0x53, 0x2c, 0x6c, 0x31,
+};
+
+/* Offset of the device key (B1) inside a 0x15/0x04 ack's value[].
+ *
+ * The command header is 8 bytes and struct bt_hidp_sw2_ack declares only its
+ * first 4, so value[] starts at header byte 4 and value[k] is command-data
+ * offset k - 4. commands.md puts the 16-byte device key at data offset 0x1,
+ * behind a constant 0x01 response marker, hence 5. */
+#define BT_HIDP_SW2_ACK_DEVICE_KEY_OFFSET 5
 static uint8_t pre_calib_report_cnt[BT_MAX_DEV] = {0};
 
 static bool bt_hid_sw2_calib_data_is_plausible(const uint8_t *data) {
@@ -479,6 +494,23 @@ void bt_hid_sw2_hdlr(struct bt_dev *device, uint16_t att_handle, uint8_t *data, 
                                 printf("%s: VID: 0x%04X PID: 0x%04X\n", __FUNCTION__, bt_data->base.vid, bt_data->base.pid);
                                 bt_mon_log(true, "%s: VID: 0x%04X PID: 0x%04X\n", __FUNCTION__, bt_data->base.vid, bt_data->base.pid);
 
+                                /* The advertisement carries the product ID too, and it
+                                 * arrives before any of this. Every downstream decision
+                                 * - output template, mapping, keepalive - keys off the
+                                 * PID, so a corrupt READ_INFO payload silently picks the
+                                 * wrong everything. The two sources disagreeing is worth
+                                 * saying out loud; the correlation check above should
+                                 * already have caught it, and this says whether it did.
+                                 *
+                                 * Advisory only: the SPI value still wins, because the
+                                 * advertisement is absent on an inbound reconnect. */
+                                if (device->le_adv_pid && device->le_adv_pid != bt_data->base.pid) {
+                                    printf("# %s: PID mismatch: adv 0x%04X vs SPI 0x%04X\n",
+                                        __FUNCTION__, device->le_adv_pid, bt_data->base.pid);
+                                    bt_mon_log(true, "%s: PID mismatch: adv 0x%04X vs SPI 0x%04X\n",
+                                        __FUNCTION__, device->le_adv_pid, bt_data->base.pid);
+                                }
+
                                 /* Init output data for Rumble/LED feedback */
                                 switch (bt_data->base.pid) {
                                     case SW2_LJC_PID:
@@ -604,13 +636,53 @@ void bt_hid_sw2_hdlr(struct bt_dev *device, uint16_t att_handle, uint8_t *data, 
                                 BT_HIDP_SW2_REQ_TYPE_REQ,
                                 BT_HIDP_SW2_REQ_INT_BLE,
                                 BT_HIDP_SW2_SUBCMD_PAIRING_STEP2,
-                                0x00, 0x11, 0x00, 0x00, 0x00, 0xea, 0xbd, 0x47, 0x13, 0x89, 0x35, 0x42, 0xc6, 0x79, 0xee, 0x07, 0xf2, 0x53, 0x2c, 0x6c, 0x31
+                                0x00, 0x11, 0x00, 0x00, 0x00,
                             };
-                            bt_att_cmd_write_cmd(device->acl_handle, BT_HIDP_SW2_CMD_ATT_HDL, pair2, sizeof(pair2));
+                            uint8_t pair2_full[sizeof(pair2) + sizeof(sw2_pairing_a1)];
+
+                            memcpy(pair2_full, pair2, sizeof(pair2));
+                            memcpy(pair2_full + sizeof(pair2), sw2_pairing_a1, sizeof(sw2_pairing_a1));
+                            bt_att_cmd_write_cmd(device->acl_handle, BT_HIDP_SW2_CMD_ATT_HDL,
+                                pair2_full, sizeof(pair2_full));
                             break;
                         }
                         case BT_HIDP_SW2_SUBCMD_PAIRING_STEP2:
                         {
+                            /* Instrumentation only, for the derived-LTK experiment.
+                             *
+                             * This ack carries the controller's key (B1), and the
+                             * shared LTK is A1 XOR B1 - which is how the real console
+                             * obtains it. This firmware instead reads the key back out
+                             * of SPI flash at 0x1FA01A afterwards, which is the source
+                             * of the stale-key and bricked-pad failures.
+                             *
+                             * B1 is documented as the fixed constant
+                             * 5CF6EE792CDF05E1BA2B6325C41A5F10, and with A1 also
+                             * constant the derived key would be the same every time.
+                             * Printing both here, next to the existing "NEW LTK" dump
+                             * of the flash read, turns the comparison into one serial
+                             * capture: if the derived value matches the flash value in
+                             * either byte order, the SPI reads can go.
+                             *
+                             * Deliberately does not change what is stored. */
+                            const uint8_t *b1 = &ack->value[BT_HIDP_SW2_ACK_DEVICE_KEY_OFFSET];
+                            uint8_t derived[16];
+
+                            printf("%s: B1: ", __FUNCTION__);
+                            for (uint32_t i = 0; i < sizeof(derived); i++) {
+                                derived[i] = sw2_pairing_a1[i] ^ b1[i];
+                                printf("%02X ", b1[i]);
+                            }
+                            printf("\n%s: derived LTK (A1^B1): ", __FUNCTION__);
+                            for (uint32_t i = 0; i < sizeof(derived); i++) {
+                                printf("%02X ", derived[i]);
+                            }
+                            printf("\n%s: derived LTK reversed: ", __FUNCTION__);
+                            for (uint32_t i = sizeof(derived); i > 0; i--) {
+                                printf("%02X ", derived[i - 1]);
+                            }
+                            printf("\n");
+
                             uint8_t pair3[] = {
                                 BT_HIDP_SW2_CMD_PAIRING,
                                 BT_HIDP_SW2_REQ_TYPE_REQ,

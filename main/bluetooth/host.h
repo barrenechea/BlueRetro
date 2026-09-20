@@ -87,6 +87,10 @@ struct bt_dev {
     uint32_t hid_state;
     void *timer_hdl;
     void *conn_timer_hdl;
+    /* Product ID as seen in the BLE advertisement, or 0 if there was none.
+     * Cross-checked against the value the controller reports out of SPI flash;
+     * see the READ_INFO ack in hidp/sw2.c. */
+    uint16_t le_adv_pid;
     uint8_t tid;
     uint8_t hid_retry_cnt;
     const struct bt_name_type *name;
