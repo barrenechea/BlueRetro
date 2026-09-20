@@ -8,8 +8,16 @@
 
 #include "hidp.h"
 
-#define SW2_LJC_PID 0x2066
-#define SW2_RJC_PID 0x2067
+/* Product IDs, as reported over USB and in the BLE advertisement.
+ *
+ * L and R are the way round they look wrong. Confirmed against SDL
+ * (src/joystick/usb_ids.h: USB_PRODUCT_NINTENDO_SWITCH2_JOYCON_LEFT 0x2067,
+ * _RIGHT 0x2066), Linux hid-ids.h, bluepad32's uni_hid_parser_switch2.h, and
+ * lsusb product strings ("Joy-Con 2 (R)" for 057e:2066). Upstream and
+ * darthcloud issue #1249 had these swapped; do not "fix" them back. */
+#define SW2_RJC_PID 0x2066
+#define SW2_LJC_PID 0x2067
+#define SW2_JC_PAIR_PID 0x2068 /* USB composite only, never seen on BLE */
 #define SW2_PRO2_PID 0x2069
 #define SW2_GC_PID 0x2073
 
