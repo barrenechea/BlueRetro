@@ -489,6 +489,16 @@ void bt_hid_sw2_hdlr(struct bt_dev *device, uint16_t att_handle, uint8_t *data, 
                     break;
                 case BT_HIDP_SW2_CMD_SET_LED:
                     printf("# BT_HIDP_SW2_CMD_SET_LED\n");
+                    /* Controller slot is confirmed. Stop scanning so the next
+                     * controller can only pair via an explicit button press,
+                     * preventing simultaneous SW2 init races.
+                     *
+                     * Not the first such call: att_hid.c already stops inquiry on
+                     * MTU_RSP, long before SW2 init starts. This one re-asserts it
+                     * after the LE_CONN_COMPLETE handler has had its say about
+                     * advertising and scanning, which is the window a second pad
+                     * can slip into. */
+                    bt_hci_stop_inquiry();
                     device->hid_state++;
                     bt_hid_sw2_exec_next_state(device);
                     break;

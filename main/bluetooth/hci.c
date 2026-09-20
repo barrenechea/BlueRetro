@@ -4,6 +4,7 @@
  */
 
 #include <stdio.h>
+#include <stdbool.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/ringbuf.h>
@@ -1088,14 +1089,56 @@ static void bt_hci_le_meta_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                 }
             }
             else {
-                bt_host_get_dev_conf(&device);
-
-                if (!le_conn_complete->status && !atomic_test_bit(&device->flags, BT_DEV_DEVICE_FOUND)) {
-                    atomic_set_bit(&device->flags, BT_DEV_DEVICE_FOUND);
-                    device->acl_handle = le_conn_complete->handle;
+                /* Inbound BLE connection (adapter is peripheral, controller is central).
+                 * If we recognise this peer (have an LTK), allocate a proper bt_dev[] slot
+                 * so ACL routing works for HID/SMP traffic.  Unknown peers (first-time
+                 * pairing) still go to bt_dev_conf so the SMP exchange can proceed. */
+                struct bt_dev *new_dev = NULL;
+                if (!le_conn_complete->status
+                        && bt_host_load_le_ltk((bt_addr_le_t *)&le_conn_complete->peer_addr, NULL, NULL) == 0
+                        && bt_host_get_new_dev(&new_dev) >= 0) {
+                    bt_host_reset_dev(new_dev);
+                    memcpy(&new_dev->le_remote_bdaddr, &le_conn_complete->peer_addr, sizeof(new_dev->le_remote_bdaddr));
+                    new_dev->ids.type = BT_HID_GENERIC;
+                    bt_l2cap_init_dev_scid(new_dev);
+                    atomic_set_bit(&new_dev->flags, BT_DEV_DEVICE_FOUND);
+                    atomic_set_bit(&new_dev->flags, BT_DEV_IS_BLE);
+                    new_dev->acl_handle = le_conn_complete->handle;
+                    device = new_dev;
+                    /* Same reasoning as the outbound path: a peer that connects and then
+                     * stops short of becoming a controller must not keep the slot, and
+                     * this path allocates a slot exactly as that one does. Not in the
+                     * upstream hunk, which predates the watchdog. */
+                    bt_hci_arm_conn_watchdog(new_dev);
+                    printf("# Inbound BLE reconnect: dev: %ld\n", new_dev->ids.id);
+                    bt_mon_log(true, "Inbound BLE reconnect: dev: %ld\n", new_dev->ids.id);
                 }
                 else {
-                    printf("# dev NULL!\n");
+                    bt_host_get_dev_conf(&device);
+                    if (!le_conn_complete->status && !atomic_test_bit(&device->flags, BT_DEV_DEVICE_FOUND)) {
+                        atomic_set_bit(&device->flags, BT_DEV_DEVICE_FOUND);
+                        device->acl_handle = le_conn_complete->handle;
+                    }
+                    else {
+                        printf("# dev NULL!\n");
+                    }
+                }
+            }
+            /* SW2 controllers connect to us as BLE peripherals; advertising
+             * auto-stops on each accepted connection. The ESP32 cannot advertise,
+             * scan and service connections at the same time, so once we have two
+             * BLE controllers we STOP advertising and scanning to free the radio
+             * for servicing both links (otherwise only the latest one is serviced).
+             * Below two, keep advertising so the next controller can connect. */
+            if (!le_conn_complete->status) {
+                struct bt_dev *free_dev = NULL;
+                if (bt_host_get_flag_dev_cnt(BT_DEV_IS_BLE) < 2
+                        && bt_host_get_new_dev(&free_dev) >= 0) {
+                    bt_hci_cmd_le_set_adv_enable(NULL);
+                }
+                else {
+                    bt_hci_cmd_le_set_scan_enable(0);
+                    bt_hci_cmd_le_set_adv_disable(NULL);
                 }
             }
             break;
@@ -1202,6 +1245,35 @@ skip:
             }
             else {
                 printf("# dev NULL!\n");
+            }
+            break;
+        }
+        case BT_HCI_EVT_LE_LTK_REQUEST:
+        {
+            /* Needed because a reconnecting SW2 pad acts as BLE central against our
+             * advertiser: it starts encryption, and the controller asks us for the key
+             * rather than the other way round. Without this the request goes
+             * unanswered and the link drops. */
+            struct bt_hci_evt_le_ltk_request *ltk_req =
+                (struct bt_hci_evt_le_ltk_request *)(bt_hci_evt_pkt->evt_data + sizeof(struct bt_hci_evt_le_meta_event));
+            struct bt_smp_encrypt_info encrypt_info = {0};
+            bool replied = false;
+
+            printf("# BT_HCI_EVT_LE_LTK_REQUEST handle=0x%04X\n", ltk_req->handle);
+            bt_host_get_dev_from_handle(ltk_req->handle, &device);
+            if (device && bt_host_load_le_ltk(&device->le_remote_bdaddr, &encrypt_info, NULL) == 0) {
+                struct bt_hci_cp_le_ltk_req_reply *ltk_reply =
+                    (struct bt_hci_cp_le_ltk_req_reply *)&bt_hci_pkt_tmp.cp;
+                ltk_reply->handle = ltk_req->handle;
+                memcpy(ltk_reply->ltk, encrypt_info.ltk, sizeof(ltk_reply->ltk));
+                bt_hci_cmd(BT_HCI_OP_LE_LTK_REQ_REPLY, sizeof(*ltk_reply));
+                replied = true;
+            }
+            if (!replied) {
+                struct bt_hci_cp_le_ltk_req_neg_reply *neg_reply =
+                    (struct bt_hci_cp_le_ltk_req_neg_reply *)&bt_hci_pkt_tmp.cp;
+                neg_reply->handle = ltk_req->handle;
+                bt_hci_cmd(BT_HCI_OP_LE_LTK_REQ_NEG_REPLY, sizeof(*neg_reply));
             }
             break;
         }
@@ -1560,6 +1632,14 @@ void bt_hci_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                         bt_hci_start_inquiry();
                     }
                     bt_hci_cmd_le_set_adv_enable(NULL);
+                }
+                else {
+                    /* Other controllers still connected; re-advertise if a slot freed
+                     * up, so the pad that just dropped can come back. */
+                    struct bt_dev *free_dev = NULL;
+                    if (bt_host_get_new_dev(&free_dev) >= 0) {
+                        bt_hci_cmd_le_set_adv_enable(NULL);
+                    }
                 }
             }
             else {
