@@ -32,6 +32,32 @@ controller fixes drawn from the RyanCopley, Last-Colossi, bjerreman and
 LaserBear Industries forks. See the git log for per-change detail and
 attribution.
 
+### Switch 2 controller support
+
+Supported over Bluetooth LE: **Pro Controller 2** (`0x2069`), **NSO GameCube**
+(`0x2073`), and **Joy-Con 2** left (`0x2067`) and right (`0x2066`). A controller
+type this build does not recognise falls back to the Pro Controller 2 layout
+rather than delivering no input.
+
+There is no Switch 2 NSO SNES, N64, NES or Mega Drive controller. Those pads are
+Switch 1 devices on Bluetooth BR/EDR, supported by a different code path
+entirely and unaffected by any of this.
+
+Known limitations:
+
+* **Pairing a Switch 2 controller to BlueRetro unpairs it from a Switch 2
+  console.** The controller stores one host pairing, so the console's entry is
+  overwritten. Re-sync on the console (cable or the sync button) to use it there
+  again. This is a property of the controller, not of the adapter.
+* **Joy-Con 2 halves work one per player, held sideways**, like Switch 1
+  Joy-Cons. Merging a left and right half into a single controller is not
+  implemented.
+* **Two simultaneous BLE controllers is the practical radio limit.** The ESP32
+  cannot advertise, scan and service links at once, so advertising stops once
+  two are connected and resumes when a slot frees. Pairing several controllers
+  at the same moment can still collide; pair them one at a time.
+* **Motion, mouse and headset-audio features are not implemented.**
+
 ### GameCube builds: combo buttons differ from upstream
 
 Super Smash Bros. Melee resets a match on **L + R + A + Start**, which is exactly
