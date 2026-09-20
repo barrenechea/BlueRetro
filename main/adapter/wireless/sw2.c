@@ -321,8 +321,22 @@ int32_t sw2_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data)
         case SW2_GC_PID:
             return sw2_gc_to_generic(bt_data, ctrl_data);
         default:
-            printf("# Unknown pid : %04X\n", bt_data->base.pid);
-            return -1;
+            /* A Switch 2 controller we have never heard of still pairs, completes
+             * GATT, reads its calibration and lights its LED - and then returned -1
+             * here, so it delivered no input whatsoever and looked unsupported.
+             *
+             * Input report 0x05 on handle 0x000A is common to every SW2 controller
+             * type (ndeadly, hid_reports.md), so the Pro 2 parse is correct by
+             * construction for the shared fields: counter, button dword, both
+             * sticks. What an unknown type loses is only its type-specific extras,
+             * the way the GameCube pad's analog triggers would be lost here.
+             *
+             * sw2_pad_init() already falls through `case SW2_PRO2_PID: default:` to
+             * the Pro 2 mapping tables, so this path was reachable and correct; it
+             * was simply never reached. */
+            printf("# %s: unknown SW2 pid %04X, using the Pro 2 mapping\n",
+                __FUNCTION__, bt_data->base.pid);
+            return sw2_pro_to_generic(bt_data, ctrl_data);
     }
     return 0;
 }
@@ -368,6 +382,9 @@ bool sw2_fb_from_generic(struct generic_fb *fb_data, struct bt_data *bt_data) {
             break;
         }
         case SW2_PRO2_PID:
+        default:
+            /* An unknown SW2 PID lands here with the Pro 2 layout, matching the
+             * fallback in sw2_to_generic(). */
             switch (fb_data->type) {
                 case FB_TYPE_RUMBLE:
                     if (fb_data->hf_pwr || fb_data->lf_pwr) {
@@ -415,8 +432,6 @@ bool sw2_fb_from_generic(struct generic_fb *fb_data, struct bt_data *bt_data) {
             ret = (cur_val != bt_data->base.output[2]);
             break;
         }
-        default:
-            printf("# Unknown pid : %04X\n", bt_data->base.pid);
     }
     return ret;
 }

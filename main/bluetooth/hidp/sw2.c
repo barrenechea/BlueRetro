@@ -214,9 +214,19 @@ void bt_hid_sw2_init_rumble_pro2(struct bt_data *bt_data) {
 void bt_hid_cmd_sw2_out(struct bt_dev *device, void *report) {
     struct bt_data *bt_data = &bt_adapter.data[device->ids.id];
     if (bt_data) {
+        /* pid is zero until the READ_INFO ack lands. Nothing below can be shaped
+         * correctly before then, and the default case would otherwise send a
+         * zeroed Pro 2 frame for a controller whose type is not yet known. */
+        if (bt_data->base.pid == 0) {
+            return;
+        }
         switch (bt_data->base.pid) {
             case SW2_PRO2_PID:
-                bt_att_cmd_write_cmd(device->acl_handle, BT_HIDP_SW2_OUT_CMD_ATT_HDL, (uint8_t *)report, 41);
+            default:
+                /* Unknown SW2 PIDs use the Pro 2 frame, matching the templates set
+                 * up in the READ_INFO ack and the mapping in sw2_to_generic(). */
+                bt_att_cmd_write_cmd(device->acl_handle, BT_HIDP_SW2_OUT_CMD_ATT_HDL, (uint8_t *)report,
+                    BT_HIDP_SW2_PRO2_CMD_OFFSET + BT_HIDP_SW2_CMD_HDR_LEN);
                 bt_data->base.output[17] &= 0xF0;
                 bt_data->base.output[17] |= device->tid & 0xF;
                 break;
@@ -465,7 +475,16 @@ void bt_hid_sw2_hdlr(struct bt_dev *device, uint16_t att_handle, uint8_t *data, 
                                         bt_hid_sw2_init_rumble_gc(bt_data);
                                         break;
                                     default:
-                                        printf("# Unknown pid : %04X\n", bt_data->base.pid);
+                                        /* Pro 2 shaped, matching the mapping fallback in
+                                         * sw2_to_generic(). Leaving the buffer zeroed meant an
+                                         * unrecognised SW2 controller got no feedback frame at
+                                         * all, and with the keepalive that now also means no
+                                         * link maintenance. */
+                                        printf("# %s: unknown SW2 pid %04X, using the Pro 2 output template\n",
+                                            __FUNCTION__, bt_data->base.pid);
+                                        bt_mon_log(true, "%s: unknown SW2 pid %04X, using the Pro 2 output template\n",
+                                            __FUNCTION__, bt_data->base.pid);
+                                        bt_hid_sw2_init_rumble_pro2(bt_data);
                                         break;
                                 }
                             }
