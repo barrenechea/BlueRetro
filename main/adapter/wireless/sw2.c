@@ -117,6 +117,41 @@ static const uint32_t sw2_gc_btns_mask[32] = {
     0, BIT(SW2_ZR), BIT(SW2_R), 0,
 };
 
+/* Solo Joy-Con 2, either half, held sideways.
+ *
+ * The generic mapping deliberately mirrors what this codebase already does for
+ * a solo Switch 1 Joy-Con (sw_jc_btns_mask row 1 in wireless/sw.c): the half's
+ * four d-pad or face buttons rotate onto the generic face buttons, SL/SR become
+ * the shoulders, and the stick's axes swap. A SW2 half therefore behaves the
+ * same way a SW1 half already does.
+ *
+ * The bit positions are SW2's own, from input report 0x05's button dword. The
+ * commented-out stubs upstream left here were copies of the SW1 table; they
+ * cannot be used directly, because SW1 and SW2 order that dword differently.
+ * L-half and R-half bits are disjoint within the dword, so one table serves
+ * both halves - again as sw.c does. */
+static const uint32_t sw2_jc_mask[4] = {0x3B3F000F, 0x00000000, 0x00000000, 0x00000000};
+static const uint32_t sw2_jc_desc[4] = {0x0000000F, 0x00000000, 0x00000000, 0x00000000};
+static const uint32_t sw2_jc_btns_mask[32] = {
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    BIT(SW2_B) | BIT(SW2_UP), BIT(SW2_X) | BIT(SW2_DOWN),
+    BIT(SW2_A) | BIT(SW2_LEFT), BIT(SW2_Y) | BIT(SW2_RIGHT),
+    BIT(SW2_CAPTURE) | BIT(SW2_PLUS), BIT(SW2_MINUS) | BIT(SW2_HOME), 0, 0,
+    BIT(SW2_L_SL) | BIT(SW2_R_SL), BIT(SW2_ZL) | BIT(SW2_ZR), 0, BIT(SW2_LJ) | BIT(SW2_RJ),
+    BIT(SW2_L_SR) | BIT(SW2_R_SR), BIT(SW2_L) | BIT(SW2_R), 0, 0,
+};
+
+/* Swaps X and Y so the calibration for the half's physical axes lands on the
+ * generic axes they are rotated onto. Same values sw.c uses for a SW1 half. */
+static const uint8_t sw2_jc_axes_idx[ADAPTER_MAX_AXES] =
+{
+/*  AXIS_LX, AXIS_LY, AXIS_RX, AXIS_RY, TRIG_L, TRIG_R  */
+    1,       0,       3,       2,       4,      5
+};
+
 static int32_t sw2_pad_init(struct bt_data *bt_data) {
     struct bt_hid_sw2_ctrl_calib *calib = NULL;
     const uint8_t *axes_idx = sw2_axes_idx;
@@ -129,31 +164,22 @@ static int32_t sw2_pad_init(struct bt_data *bt_data) {
 
     switch (bt_data->base.pid) {
         case SW2_LJC_PID:
-        {
-            // memcpy(bt_data->raw_src_mappings[PAD].btns_mask, &sw_jc_btns_mask[report_type],
-            //     sizeof(bt_data->raw_src_mappings[PAD].btns_mask));
-
-            // meta[0].polarity = 1;
-            // meta[1].polarity = 0;
-            // axes_idx = sw_jc_axes_idx;
-            // memcpy(bt_data->raw_src_mappings[PAD].mask, sw_jc_mask,
-            //     sizeof(bt_data->raw_src_mappings[PAD].mask));
-            // memcpy(bt_data->raw_src_mappings[PAD].desc, desc,
-            //     sizeof(bt_data->raw_src_mappings[PAD].desc));
-            break;
-        }
         case SW2_RJC_PID:
         {
-            // memcpy(bt_data->raw_src_mappings[PAD].btns_mask, &sw_jc_btns_mask[report_type],
-            //     sizeof(bt_data->raw_src_mappings[PAD].btns_mask));
+            memcpy(bt_data->raw_src_mappings[PAD].btns_mask, sw2_jc_btns_mask,
+                sizeof(bt_data->raw_src_mappings[PAD].btns_mask));
 
-            // meta[0].polarity = 0;
-            // meta[1].polarity = 1;
-            // axes_idx = sw_jc_axes_idx;
-            // memcpy(bt_data->raw_src_mappings[PAD].mask, sw_jc_mask,
-            //     sizeof(bt_data->raw_src_mappings[PAD].mask));
-            // memcpy(bt_data->raw_src_mappings[PAD].desc, desc,
-            //     sizeof(bt_data->raw_src_mappings[PAD].desc));
+            /* Held sideways, so one axis reads backwards; which one depends on
+             * which way up the half is. Same split sw.c applies to a SW1 half. */
+            meta[0].polarity = (bt_data->base.pid == SW2_LJC_PID) ? 1 : 0;
+            meta[1].polarity = (bt_data->base.pid == SW2_LJC_PID) ? 0 : 1;
+            meta[2].polarity = 0;
+            meta[3].polarity = 0;
+            axes_idx = sw2_jc_axes_idx;
+            memcpy(bt_data->raw_src_mappings[PAD].mask, sw2_jc_mask,
+                sizeof(bt_data->raw_src_mappings[PAD].mask));
+            memcpy(bt_data->raw_src_mappings[PAD].desc, sw2_jc_desc,
+                sizeof(bt_data->raw_src_mappings[PAD].desc));
             break;
         }
         case SW2_GC_PID:
@@ -312,10 +338,64 @@ static int32_t sw2_gc_to_generic(struct bt_data *bt_data, struct wireless_ctrl *
     return 0;
 }
 
+/* A solo Joy-Con 2 half, held sideways.
+ *
+ * Both halves report through the same composed input report 0x05, and the
+ * report is position-aware: a left half puts its stick in the left slot (report
+ * offset 0xA, map->axes[0..2]) and a right half puts its stick in the right
+ * slot (offset 0xD, map->axes[3..5]). bluepad32 splits the same two offsets in
+ * sw2_apply_left_stick_only / sw2_apply_right_stick_only.
+ *
+ * Held sideways the half's physical X reads as the generic Y and vice versa,
+ * matching what sw.c does for a SW1 half; the reversed direction is handled by
+ * meta[].polarity, set in sw2_pad_init(). */
+static int32_t sw2_jc_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data) {
+    struct sw2_map *map = (struct sw2_map *)bt_data->base.input;
+    struct ctrl_meta *meta = bt_data->raw_src_mappings[PAD].meta;
+    const uint8_t *stick;
+    uint16_t axes[4];
+
+    if (!atomic_test_bit(&bt_data->base.flags[PAD], BT_INIT)) {
+        if (sw2_pad_init(bt_data)) {
+            return -1;
+        }
+    }
+
+    memset((void *)ctrl_data, 0, sizeof(*ctrl_data));
+
+    ctrl_data->mask = (uint32_t *)sw2_jc_mask;
+    ctrl_data->desc = (uint32_t *)sw2_jc_desc;
+
+    for (uint32_t i = 0; i < ARRAY_SIZE(generic_btns_mask); i++) {
+        if (map->buttons & sw2_jc_btns_mask[i]) {
+            ctrl_data->btns[0].value |= generic_btns_mask[i];
+        }
+    }
+
+    stick = (bt_data->base.pid == SW2_LJC_PID) ? &map->axes[0] : &map->axes[3];
+
+    axes[1] = stick[0] | ((stick[1] & 0xF) << 8);
+    axes[0] = (stick[1] >> 4) | (stick[2] << 4);
+    /* The half has no second stick. Report it exactly centred rather than
+     * leaving the slot at zero, which would read as fully deflected. */
+    axes[2] = meta[2].neutral;
+    axes[3] = meta[3].neutral;
+
+    TESTS_CMDS_LOG("\"wireless_input\": {\"axes\": [%u, %u, %u, %u], \"btns\": %lu},\n",
+        axes[0], axes[1], axes[2], axes[3], map->buttons);
+
+    for (uint32_t i = 0; i < SW2_AXES_MAX; i++) {
+        ctrl_data->axes[i].meta = &meta[i];
+        ctrl_data->axes[i].value = axes[i] - meta[i].neutral;
+    }
+    return 0;
+}
+
 int32_t sw2_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data) {
     switch (bt_data->base.pid) {
         case SW2_LJC_PID:
         case SW2_RJC_PID:
+            return sw2_jc_to_generic(bt_data, ctrl_data);
         case SW2_PRO2_PID:
             return sw2_pro_to_generic(bt_data, ctrl_data);
         case SW2_GC_PID:

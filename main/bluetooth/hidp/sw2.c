@@ -286,6 +286,23 @@ static void bt_hid_sw2_read_spi(struct bt_dev *device, uint32_t state) {
 }
 
 static void bt_hid_sw2_exec_next_state(struct bt_dev *device) {
+    struct bt_data *bt_data = &bt_adapter.data[device->ids.id];
+
+    /* A Joy-Con 2 has one stick, and the official console init reads only the
+     * primary factory calibration block (0x13080) for either half - never the
+     * secondary at 0x130C0 (ndeadly, bluetooth_interface.md, "JoyCon 2"
+     * sequence). Reading it anyway returns whatever is in flash for a slot the
+     * half does not have, and the plausibility check is not guaranteed to
+     * reject it. Skip the state outright for these PIDs.
+     *
+     * The right half is not an exception: its calibration lives in the primary
+     * block too, even though its stick data arrives in the right-hand slot of
+     * input report 0x05. sw2_jc_axes_idx routes it accordingly. */
+    if (device->hid_state == SW2_INIT_STATE_READ_RIGHT_FACTORY_CALIB
+            && bt_data && bt_hid_sw2_pid_is_jc(bt_data->base.pid)) {
+        device->hid_state++;
+    }
+
     switch(device->hid_state) {
         case SW2_INIT_STATE_READ_INFO:
             bt_hid_sw2_read_spi(device, device->hid_state);
