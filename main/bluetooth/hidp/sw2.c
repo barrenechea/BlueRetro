@@ -169,6 +169,29 @@ void bt_hid_sw2_init_rumble_gc(struct bt_data *bt_data) {
     bt_data->base.output[13] = bt_hid_led_dev_id_map[bt_data->base.pids->out_idx];
 }
 
+bool bt_hid_sw2_pid_is_jc(uint16_t pid) {
+    return pid == SW2_LJC_PID || pid == SW2_RJC_PID;
+}
+
+/* Joy-Con 2, either half. Same idle LRA template as the Pro 2 but with one
+ * block instead of two, so the command header lands 16 bytes earlier. Using the
+ * Pro 2 template here - which is what upstream did for these PIDs - puts the
+ * header inside what the controller reads as rumble data. */
+void bt_hid_sw2_init_rumble_jc(struct bt_data *bt_data) {
+    bt_data->base.output[1] = 0x50;
+    bt_data->base.output[2] = 0xe1;
+    bt_data->base.output[4] = 0x10;
+    bt_data->base.output[5] = 0x1e;
+
+    bt_data->base.output[BT_HIDP_SW2_JC_CMD_OFFSET + 0] = BT_HIDP_SW2_CMD_SET_LED;
+    bt_data->base.output[BT_HIDP_SW2_JC_CMD_OFFSET + 1] = BT_HIDP_SW2_REQ_TYPE_REQ;
+    bt_data->base.output[BT_HIDP_SW2_JC_CMD_OFFSET + 2] = BT_HIDP_SW2_REQ_INT_BLE;
+    bt_data->base.output[BT_HIDP_SW2_JC_CMD_OFFSET + 3] = BT_HIDP_SW2_SUBCMD_SET_LED;
+    bt_data->base.output[BT_HIDP_SW2_JC_CMD_OFFSET + 6] = 0x08;
+    bt_data->base.output[BT_HIDP_SW2_JC_CMD_OFFSET + BT_HIDP_SW2_CMD_HDR_LEN] =
+        bt_hid_led_dev_id_map[bt_data->base.pids->out_idx];
+}
+
 void bt_hid_sw2_init_rumble_pro2(struct bt_data *bt_data) {
     bt_data->base.output[1] = 0x50;
     bt_data->base.output[2] = 0xe1;
@@ -196,6 +219,20 @@ void bt_hid_cmd_sw2_out(struct bt_dev *device, void *report) {
                 bt_att_cmd_write_cmd(device->acl_handle, BT_HIDP_SW2_OUT_CMD_ATT_HDL, (uint8_t *)report, 41);
                 bt_data->base.output[17] &= 0xF0;
                 bt_data->base.output[17] |= device->tid & 0xF;
+                break;
+            case SW2_LJC_PID:
+            case SW2_RJC_PID:
+                /* 17 + 8: the single-LRA prefix plus the command header, the same
+                 * shape the Pro 2 case above uses (33 + 8). Upstream sends nothing
+                 * at all for these PIDs, which is why a Joy-Con 2 drops the link
+                 * without rumble traffic.
+                 *
+                 * If a Joy-Con 2 still times out on hardware, the reference
+                 * implementation to fall back to is bluepad32's: a bare 17-byte
+                 * vibration report on BT_HIDP_SW2_OUT_ATT_HDL (0x0012) with no
+                 * command header at all, 33 bytes for a Pro 2. */
+                bt_att_cmd_write_cmd(device->acl_handle, BT_HIDP_SW2_OUT_CMD_ATT_HDL, (uint8_t *)report,
+                    BT_HIDP_SW2_JC_CMD_OFFSET + BT_HIDP_SW2_CMD_HDR_LEN);
                 break;
             case SW2_GC_PID:
                 bt_att_cmd_write_cmd(device->acl_handle, BT_HIDP_SW2_OUT_CMD_ATT_HDL, (uint8_t *)report, 21);
@@ -401,6 +438,8 @@ void bt_hid_sw2_hdlr(struct bt_dev *device, uint16_t att_handle, uint8_t *data, 
                                 switch (bt_data->base.pid) {
                                     case SW2_LJC_PID:
                                     case SW2_RJC_PID:
+                                        bt_hid_sw2_init_rumble_jc(bt_data);
+                                        break;
                                     case SW2_PRO2_PID:
                                         bt_hid_sw2_init_rumble_pro2(bt_data);
                                         break;

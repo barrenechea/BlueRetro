@@ -6,6 +6,7 @@
 #ifndef _BT_HIDP_SW2_H_
 #define _BT_HIDP_SW2_H_
 
+#include <stdbool.h>
 #include "hidp.h"
 
 /* Product IDs, as reported over USB and in the BLE advertisement.
@@ -91,12 +92,33 @@ struct sw2_lra_ops_t {
     struct sw2_lra_op_t ops[3];
 } __packed;
 
+/* The rumble block that prefixes both output reports is per controller type:
+ * two 16-byte LRA blocks on a Pro 2, one on either Joy-Con 2, and a 4-byte
+ * motor field on the NSO GameCube pad. Everything that follows it - the command
+ * header on handle 0x0016 - therefore starts at a different offset for each.
+ * (ndeadly switch2_controller_research, bluetooth_interface.md.)
+ *
+ * Getting this wrong is silent: the frame is still accepted, the command inside
+ * it simply lands in the rumble payload. */
+#define BT_HIDP_SW2_JC_CMD_OFFSET 0x11   /* 17: zero + 1 LRA block */
+#define BT_HIDP_SW2_PRO2_CMD_OFFSET 0x21 /* 33: zero + 2 LRA blocks */
+#define BT_HIDP_SW2_GC_CMD_OFFSET 0x05   /* 5:  zero + 4-byte GC motor field */
+#define BT_HIDP_SW2_CMD_HDR_LEN 8
+
 #define BT_HIDP_SW2_OUT_ATT_HDL 0x0012
+/* Pro 2: Output Report 0x02. */
 struct bt_hidp_sw2_out {
     uint8_t zero;
     struct sw2_lra_ops_t l_lra;
     struct sw2_lra_ops_t r_lra;
     uint8_t padding[9];
+} __packed;
+
+/* Joy-Con 2 (either half): Output Report 0x01. One LRA, not two. */
+struct bt_hidp_sw2_out_jc {
+    uint8_t zero;
+    struct sw2_lra_ops_t lra;
+    uint8_t padding[25];
 } __packed;
 
 #define BT_HIDP_SW2_REQ_TYPE_REQ 0x91
@@ -114,10 +136,22 @@ struct bt_hidp_sw2_cmd {
 } __packed;
 
 #define BT_HIDP_SW2_OUT_CMD_ATT_HDL 0x0016
+/* Pro 2 flavour: command header at BT_HIDP_SW2_PRO2_CMD_OFFSET. */
 struct bt_hidp_sw2_out_cmd {
     uint8_t pad;
     struct sw2_lra_ops_t l_lra;
     struct sw2_lra_ops_t r_lra;
+    uint8_t cmd;
+    uint8_t type;
+    uint8_t interface;
+    uint8_t subcmd;
+    uint8_t value[0];
+} __packed;
+
+/* Joy-Con 2 flavour: command header at BT_HIDP_SW2_JC_CMD_OFFSET. */
+struct bt_hidp_sw2_out_cmd_jc {
+    uint8_t pad;
+    struct sw2_lra_ops_t lra;
     uint8_t cmd;
     uint8_t type;
     uint8_t interface;
@@ -147,6 +181,7 @@ struct bt_hidp_sw2_ack {
 } __packed;
 
 void bt_hid_cmd_sw2_out(struct bt_dev *device, void *report);
+bool bt_hid_sw2_pid_is_jc(uint16_t pid);
 void bt_hid_sw2_get_calib(int32_t dev_id, struct bt_hid_sw2_ctrl_calib **cal);
 void bt_hid_sw2_init(struct bt_dev *device);
 void bt_hid_sw2_hdlr(struct bt_dev *device, uint16_t att_handle, uint8_t *data, uint32_t len);

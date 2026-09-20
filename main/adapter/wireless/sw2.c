@@ -334,6 +334,39 @@ bool sw2_fb_from_generic(struct generic_fb *fb_data, struct bt_data *bt_data) {
     switch (bt_data->base.pid) {
         case SW2_LJC_PID:
         case SW2_RJC_PID:
+        {
+            /* One LRA, not two, so the Pro 2 layout above does not apply: the
+             * command header and its LED byte sit 16 bytes earlier. Drive the
+             * half's single motor from the channel that matches its side, the
+             * same way the Pro 2 splits hf_pwr to the right and lf_pwr to the
+             * left. */
+            struct bt_hidp_sw2_out_jc *out_jc = (struct bt_hidp_sw2_out_jc *)bt_data->base.output;
+            bool is_left = (bt_data->base.pid == SW2_LJC_PID);
+            uint8_t pwr = is_left ? fb_data->lf_pwr : fb_data->hf_pwr;
+
+            switch (fb_data->type) {
+                case FB_TYPE_RUMBLE:
+                    if (fb_data->hf_pwr || fb_data->lf_pwr) {
+                        out_jc->lra.ops[0].hf_freq = is_left ?
+                            BT_HIDP_SW2_LRA_L_HF_FREQ : BT_HIDP_SW2_LRA_R_HF_FREQ;
+                        out_jc->lra.ops[0].hf_amp = (uint8_t)((float)pwr / 2.68);
+                        out_jc->lra.ops[0].lf_freq = is_left ?
+                            BT_HIDP_SW2_LRA_L_LF_FREQ : BT_HIDP_SW2_LRA_R_LF_FREQ;
+                        out_jc->lra.ops[0].lf_amp = (uint16_t)((float)pwr / 0.3156);
+                        out_jc->lra.ops[0].enable = 1;
+                    }
+                    else {
+                        out_jc->lra.ops[0].val = BT_HIDP_SW2_LRA_IDLE_32;
+                        out_jc->lra.ops[0].hf_amp = BT_HIDP_SW2_LRA_IDLE_8;
+                    }
+                    break;
+                case FB_TYPE_PLAYER_LED:
+                    bt_data->base.output[BT_HIDP_SW2_JC_CMD_OFFSET + BT_HIDP_SW2_CMD_HDR_LEN] =
+                        bt_hid_led_dev_id_map[bt_data->base.pids->out_idx];
+                    break;
+            }
+            break;
+        }
         case SW2_PRO2_PID:
             switch (fb_data->type) {
                 case FB_TYPE_RUMBLE:
