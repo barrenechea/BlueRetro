@@ -661,6 +661,16 @@ void bt_host_reset_dev(struct bt_dev *device) {
     return;
 
 reset_dev:
+    /* Before the memset below, which would otherwise drop the handle of a
+     * still-armed connection watchdog on the floor: the esp_timer would leak,
+     * and worse, it would keep firing against a slot that bt_host_get_new_dev()
+     * can hand to a different controller, whose init it would then tear down.
+     *
+     * Disarming here rather than only at each call site removes the ordering
+     * hazard entirely; the explicit disarm in DISCONN_COMPLETE stays, and is
+     * harmless because disarming NULLs the handle. */
+    bt_hci_disarm_conn_watchdog(device);
+
     adapter_init_buffer(dev_id);
     memset(bt_adapter.data[dev_id].raw_src_mappings, 0, sizeof(*bt_adapter.data[0].raw_src_mappings) * REPORT_MAX);
     memset(bt_adapter.data[dev_id].reports, 0, sizeof(bt_adapter.data[0].reports));
