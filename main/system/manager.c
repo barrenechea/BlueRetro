@@ -628,7 +628,11 @@ static void IRAM_ATTR sys_mgr_wired_reinit_task(void) {
 }
 
 static void sys_mgr_wired_reset(void) {
-    init_app_cpu_baremetal();
+    if (init_app_cpu_baremetal() != ESP_OK) {
+        /* Not recoverable here, but not fatal to the running system either:
+         * start_app_cpu below refuses and reports when CPU1 never came up. */
+        printf("# APP CPU restart timed out\n");
+    }
     start_app_cpu(sys_mgr_wired_reinit_task);
     port_state = 0;
 }

@@ -37,6 +37,8 @@
 #include <xtensa/xt_specreg.h>
 #include <xtensa_api.h>
 #include <xtensa/config/core.h>
+#include <esp_rom_sys.h>
+#include "esp_private/startup_internal.h"
 
 typedef void (*wired_init_t)(void);
 
@@ -217,15 +219,24 @@ int32_t start_app_cpu(wired_init_t user)
 }
 
 
+/* CPU1 reaches app_cpu_init() within microseconds of coming out of reset, so
+ * this bound is generous; exceeding it means it never started at all. Bounded
+ * so that failure is reported rather than becoming a silent freeze.
+ * esp_rom_delay_us() is the timebase here because esp_timer is not up yet - it
+ * registers after us in the init array - and it is what IDF's own early-boot
+ * waits use. */
+#define APP_CPU_START_TIMEOUT_US 100000
+#define APP_CPU_START_POLL_US 10
+
 /*
  * Initializes the app cpu. Somehow the APP cpu will wreak havoc on the heap when it starts.
  * Even if I give it a trivial infinite loop, it will still cause memory corruption.
  * Not sure what exactly is going on there, might be some kind of initialization sequence of the hardware maybe?
  * Anyway, the only possible workaround is to do it like the SDK and start the CPU before the heap is initialized.
- * Therefore we need to insert a call to this in cpu_start.c from the SDK before it calls heap_caps_init().
+ * Therefore this runs from the ESP_SYSTEM_INIT_FN below, ordered ahead of IDF's own init_heap.
  * We will then do some initialization on the APP CPU before turning off the clock again until the APP core is needed.
  */
-void init_app_cpu_baremetal()
+esp_err_t init_app_cpu_baremetal(void)
 {
     // Halt CPU1 first. This is also reached at runtime from sys_mgr's wired
     // reinit, where CPU1 is executing app_cpu_main(); its interrupt matrix must
@@ -261,6 +272,24 @@ void init_app_cpu_baremetal()
 
     ets_set_appcpu_boot_addr((uint32_t)&app_cpu_init);
 
-    while (!app_cpu_initial_start) {}
+    for (uint32_t waited_us = 0; !app_cpu_initial_start; waited_us += APP_CPU_START_POLL_US)
+    {
+        if (waited_us >= APP_CPU_START_TIMEOUT_US)
+        {
+            return ESP_ERR_TIMEOUT;
+        }
+        esp_rom_delay_us(APP_CPU_START_POLL_US);
+    }
+
+    return ESP_OK;
 }
 
+/* CPU1 must be running before the heap allocator is set up: IDF's own
+ * system_init_fn.txt says so against init_heap (CORE priority 100) - the ROM
+ * initialises memory the allocator would otherwise have linked free-list
+ * entries into. Registering here at priority 50 satisfies that ordering with
+ * the supported mechanism, so no copy of IDF's startup.c is needed. */
+ESP_SYSTEM_INIT_FN(init_app_cpu, CORE, BIT(0), 50)
+{
+    return init_app_cpu_baremetal();
+}

@@ -25,7 +25,9 @@
 #ifndef _BAREMETAL_H_
 #define _BAREMETAL_H_
 
+#include <esp_err.h>
+
 int32_t start_app_cpu(void (*app_cpu_main)(void));
-void init_app_cpu_baremetal();
+esp_err_t init_app_cpu_baremetal(void);
 
 #endif /* _BAREMETAL_H_ */
