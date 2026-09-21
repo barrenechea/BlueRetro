@@ -68,20 +68,21 @@ jobs:
         cat version.txt
         cp configs/${{ matrix.hw_version }}/${{ matrix.br_config }} sdkconfig
         BR_HW=_${{ matrix.hw_version }} BR_SYS=_${{ matrix.br_config }} idf.py reconfigure build
-    - name: Copy OTA initial binary
-      working-directory: ./build
+    - name: Stage artifact
+      shell: bash
       run: |
-        mkdir ota
-        mv ota_data_initial.bin ota/
+        # One dir per board: every job otherwise writes the same paths.
+        out="artifact/${{ matrix.hw_version }}_${{ matrix.br_config }}"
+        mkdir -p "$out/bootloader" "$out/partition_table" "$out/ota"
+        cp build/bootloader/bootloader.bin "$out/bootloader/"
+        cp build/partition_table/partition-table.bin "$out/partition_table/"
+        cp build/ota_data_initial.bin "$out/ota/"
+        cp build/BlueRetro*.bin "$out/"
     - name: Upload artifact
       uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.hw_version }}_${{ matrix.br_config }}
-        path: |
-          build/partition_table/partition-table.bin
-          build/bootloader/bootloader.bin
-          build/ota/ota_data_initial.bin
-          build/BlueRetro*.bin
+        path: artifact
         if-no-files-found: error
 
   package:
