@@ -2,6 +2,7 @@ name: build
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -62,9 +63,21 @@ jobs:
         # Actions overrides the image's entrypoint, so the IDF environment it
         # would otherwise set up has to be sourced by hand.
         . $IDF_PATH/export.sh
-        echo "br_version=$(git describe --always --tags --dirty)" >> $GITHUB_ENV
+        # A tag is the version verbatim. Otherwise build a dev version from the
+        # commit's own year.month, commits since the last tag, and its sha.
+        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          br_version="${GITHUB_REF#refs/tags/}"
+        else
+          cal=$(git log -1 --format=%cd --date=format:%y.%m)
+          last=$(git describe --tags --abbrev=0 --match "v[0-9]*" 2>/dev/null)
+          n=$(git rev-list --count ${last:+$last..}HEAD)
+          br_version="v${cal}-dev-${n}-g$(git rev-parse --short HEAD)"
+        fi
+        echo "br_version=$br_version" >> $GITHUB_ENV
         rm -fr build
-        echo "$(git describe --always --tags --dirty) ${{ matrix.hw_version }} ${{ matrix.br_config }}" | cut -c -31 > version.txt
+        # Version alone: project_name already carries hw and config, and the BLE
+        # characteristic that reports this is 23 bytes.
+        echo "$br_version" | cut -c -31 > version.txt
         cat version.txt
         cp configs/${{ matrix.hw_version }}/${{ matrix.br_config }} sdkconfig
         BR_HW=_${{ matrix.hw_version }} BR_SYS=_${{ matrix.br_config }} idf.py reconfigure build
@@ -133,3 +146,44 @@ jobs:
                 echo "already gone: $name ($id)"
               fi
             done
+
+  release:
+    needs: [ build, package ]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VER: ${{ needs.build.outputs.br_version }}
+
+    steps:
+      - name: Download firmware
+        uses: actions/download-artifact@v7
+        with:
+          path: dist
+          pattern: '*_hw*'
+      - name: Zip per hardware revision
+        run: |
+          cd dist
+          for d in */; do (cd "$d" && zip -qr "../${d%/}.zip" .); done
+          ls -l *.zip
+      - name: Publish
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # vYY.MM-beta stays a pre-release, matching upstream's tagging.
+            case "$GITHUB_REF_NAME" in *-beta*|*-rc*) pre=--prerelease ;; *) pre= ;; esac
+            gh release create "$GITHUB_REF_NAME" dist/*.zip $pre \
+              --title "[${GITHUB_REF_NAME#v}] $(date -u +%F)" \
+              --generate-notes
+            gh release delete dev --yes --cleanup-tag 2>/dev/null || true
+          else
+            # One rolling pre-release instead of a tag per commit.
+            gh release delete dev --yes --cleanup-tag 2>/dev/null || true
+            gh release create dev dist/*.zip \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --title "Development build $VER" \
+              --notes "Automatic pre-release from \`main\`, replaced on every push."
+          fi
