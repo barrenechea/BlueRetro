@@ -135,10 +135,10 @@ lose every combo on a GameCube build.** Remap `COMBO BASE 3` to another button i
 web config to restore them. Non-GameCube builds keep the upstream defaults.
 
 ## READ THIS FIRST
-* [Project documentation](https://github.com/darthcloud/BlueRetro/wiki)
+* [Project documentation](https://github.com/barrenechea/BlueRetro/wiki)
 
 ## Need help?
-* [Open a GitHub discussion](https://github.com/darthcloud/BlueRetro/discussions)
+* [Open a GitHub discussion](https://github.com/barrenechea/BlueRetro/discussions)
 
 ## Makers sponsoring BlueRetro
 Buying BlueRetro adapters from these makers helps support the continued development of the BlueRetro firmware!\

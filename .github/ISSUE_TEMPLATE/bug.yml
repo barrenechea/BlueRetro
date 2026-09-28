@@ -4,7 +4,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        For a single bug report only. For questions, use the [discussions forum](https://github.com/darthcloud/BlueRetro/discussions).
+        For a single bug report only. For questions, use the [discussions forum](https://github.com/barrenechea/BlueRetro/discussions).
         
         ***DO NOT EXPECT A QUICK REPLY OR RESOLUTION***
         This project is done purely in my spare time, and months can go by before I do have some.
@@ -21,9 +21,9 @@ body:
       options:
         - label: I have read and will follow the terms above.
           required: true
-        - label: I have read the documentation [BlueRetro wiki](https://github.com/darthcloud/BlueRetro/wiki) and the issue is not addressed there.
+        - label: I have read the documentation [BlueRetro wiki](https://github.com/barrenechea/BlueRetro/wiki) and the issue is not addressed there.
           required: true
-        - label: I have updated my BlueRetro to [latest version available](https://github.com/darthcloud/BlueRetro/releases/latest).
+        - label: I have updated my BlueRetro to [latest version available](https://github.com/barrenechea/BlueRetro/releases/latest).
           required: true
         - label: I have searched the issue tracker for a similar issue and not found a similar issue.
           required: true
@@ -137,4 +137,4 @@ body:
   - type: markdown
     attributes:
       value: |
-        See how to create a [BlueRetro debug trace](https://github.com/darthcloud/BlueRetro/wiki/Debug-trace).
+        See how to create a [BlueRetro debug trace](https://github.com/barrenechea/BlueRetro/wiki/Debug-trace).
