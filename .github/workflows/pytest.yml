@@ -1,26 +1,45 @@
 name: pytest
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/darthcloud/idf-blueretro:v5.5.0_2024-12-02_gcovr
-    permissions:
-      contents: write
-      pages: write
+      image: espressif/idf:release-v6.1
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: recursive
         fetch-depth: 0
+    - name: Cache build and ccache
+      uses: actions/cache@v6
+      with:
+        # build/ is a plain ninja tree and the container gives the workspace
+        # and toolchain the same paths every run, so it is safe to restore.
+        path: |
+          build
+          /root/.cache/ccache
+        key: idf6.1-qemu-${{ runner.os }}-${{ hashFiles('configs/dbg/qemu', 'main/**', 'components/**', 'CMakeLists.txt', 'sdkconfig.defaults*') }}
+        restore-keys: |
+          idf6.1-qemu-${{ runner.os }}-
+    - name: Setup test dependencies
+      shell: bash
+      run: |
+        . $IDF_PATH/export.sh
+        # The container runs as root but the workspace is owned by the
+        # runner user, so git refuses the repo as "dubious ownership".
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        # numpy is needed by tests/device_data.
+        # Pin the pytest major: 9.x renamed -junitxml to --junit-xml, so an
+        # unbounded install can break the flag below on a new major.
+        pip install "pytest>=9,<10" gcovr websocket-client numpy
     - name: Build with ESP-IDF
       shell: bash
       run: |
@@ -29,45 +48,40 @@ jobs:
         echo "$(git describe --always --tags --dirty) dbg qemu" | cut -c -31 > version.txt
         cat version.txt
         cp configs/dbg/qemu sdkconfig
-        idf.py build
+        # ccache is off by default in IDF 6.1.
+        idf.py --ccache build
+        ccache -s
     - name: Run pytest
       shell: bash
       run: |
         . $IDF_PATH/export.sh
-        (cd build; esptool.py --chip esp32 merge_bin --fill-flash-size 4MB -o flash_image.bin @flash_args)
+        (cd build; esptool --chip esp32 merge-bin --pad-to-size 4MB -o flash_image.bin @flash_args)
         qemu-system-xtensa -machine esp32 -drive file=build/flash_image.bin,if=mtd,format=raw -serial file:serial_log.txt -serial file:gcov_data.gcfn -display none -nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:8001-:80 -daemonize
-        pytest
+        pytest --junit-xml=pytest_results.xml
     - name: Generate gcov report
+      if: always()
       shell: bash
       run: |
         . $IDF_PATH/export.sh
+        # The cached build/ carries .gcda from the previous run, which no
+        # longer match rebuilt objects and make gcov reject them.
+        find build -name '*.gcda' -delete
         xtensa-esp32-elf-gcov-tool merge-stream gcov_data.gcfn
-        gcovr --gcov-executable xtensa-esp32-elf-gcov --html-details coverage.html
+        gcovr --gcov-executable xtensa-esp32-elf-gcov --html-details coverage.html --print-summary > coverage_summary.txt
+        cat coverage_summary.txt
+    - name: Publish test summary
+      if: always()
+      shell: bash
+      run: |
+        . $IDF_PATH/export.sh
+        python tests/summarize_results.py
     - name: Upload artifact
-      if: '!cancelled()'
-      uses: actions/upload-artifact@v4
+      if: always()
+      uses: actions/upload-artifact@v7
       with:
         name: logs
         path: |
           serial_log.txt
           coverage*
-        if-no-files-found: error
-    - name: Checkout gcov pages
-      uses: actions/checkout@v4
-      with:
-        repository: darthcloud/BlueRetroCoverage
-        path: ./brcov
-        token: ${{ secrets.GCOV_PAGES_PAT }}
-    - name: Upload report to GitHub Pages
-      if: ${{ (github.repository == 'darthcloud/BlueRetro') }}
-      shell: bash
-      run : |
-        git config --global user.name "GitHubAction"
-        git config --global user.email "octocat@github.com"
-        cd brcov
-        git rm coverage*
-        cp ../coverage* ./
-        cp coverage.html index.html
-        git add -A
-        git commit -m "Update coverage report"
-        git push
+          pytest_results.xml
+        if-no-files-found: ignore
