@@ -39,10 +39,11 @@ jobs:
           - hw_version: dbg
             br_config: qemu_bt_trace_replay_test
     runs-on: ubuntu-latest
-    # Espressif's official image, pinned. A prebuilt toolchain beats installing
-    # one on every job, and the tag is immutable so jobs cannot drift apart.
+    # Espressif's official image. A prebuilt toolchain beats installing one on
+    # every job. release-v6.1 follows the 6.1.x patch releases, so a rebuild
+    # of an old commit may use a newer 6.1 than it first did.
     container:
-      image: espressif/idf:v6.1
+      image: espressif/idf:release-v6.1
     outputs:
       br_version: ${{ env.br_version }}
 
