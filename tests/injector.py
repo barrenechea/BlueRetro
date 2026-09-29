@@ -1,25 +1,60 @@
 #!/usr/bin/env python3
 
 import json
+import logging
 import struct
 from websocket import WebSocket
 from time import sleep
 
 
 class BlueRetroInjector:
-    def __init__(self, url="ws://localhost:8001/ws", handle=0):
+    def __init__(self, url="ws://localhost:8001/ws", handle=0, timeout=10.0):
+        self.url = url
         self.handle = handle
-        self.ws = WebSocket()
-        self.ws.connect(url)
+        self.timeout = timeout
+        self.ws = self.__open()
 
     def __del__(self):
-        self.ws.close()
+        # Unset when the first connect in __init__ failed.
+        if hasattr(self, 'ws'):
+            self.ws.close()
+
+    def ensure_connected(self, retries=5, delay=1.0):
+        ''' Reconnect the WebSocket if it was dropped.
+
+        A read that times out closes the link (see __read). Without this,
+        that one failure cascades into every remaining test of the session.
+        '''
+        if self.ws.connected:
+            return
+        for _ in range(retries):
+            try:
+                self.ws = self.__open()
+                return
+            except Exception as e:
+                logging.debug(e)
+                sleep(delay)
+        raise ConnectionError(f"cannot reconnect websocket to {self.url}")
+
+    def __open(self):
+        ''' Without a timeout, a DUT that died mid-exchange leaves recv()
+        blocked until the host TCP stack gives up, ~19 min per test. '''
+        ws = WebSocket()
+        ws.settimeout(self.timeout)
+        ws.connect(self.url)
+        return ws
 
     def __write(self, cmd, handle, data=b''):
         self.ws.send_binary(struct.pack("<BBH", cmd, handle, len(data)) + data)
 
     def __read(self):
-        return json.loads(self.ws.recv_data()[1].decode())
+        try:
+            return json.loads(self.ws.recv_data()[1].decode())
+        except Exception:
+            # A late reply would desync the next exchange: drop the link so
+            # ensure_connected() starts a fresh one.
+            self.ws.close()
+            raise
 
     def get_logs(self):
         pass

@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: espressif/idf:release-v6.1
 
@@ -39,7 +40,7 @@ jobs:
         # numpy is needed by tests/device_data.
         # Pin the pytest major: 9.x renamed -junitxml to --junit-xml, so an
         # unbounded install can break the flag below on a new major.
-        pip install "pytest>=9,<10" gcovr websocket-client numpy
+        pip install "pytest>=9,<10" pytest-timeout gcovr websocket-client numpy
     - name: Build with ESP-IDF
       shell: bash
       run: |
@@ -57,7 +58,7 @@ jobs:
         . $IDF_PATH/export.sh
         (cd build; esptool --chip esp32 merge-bin --pad-to-size 4MB -o flash_image.bin @flash_args)
         qemu-system-xtensa -machine esp32 -drive file=build/flash_image.bin,if=mtd,format=raw -serial file:serial_log.txt -serial file:gcov_data.gcfn -display none -nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:8001-:80 -daemonize
-        pytest --junit-xml=pytest_results.xml
+        pytest --timeout=120 --junit-xml=pytest_results.xml
     - name: Generate gcov report
       if: always()
       shell: bash

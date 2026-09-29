@@ -16,6 +16,8 @@ from collections import OrderedDict
 
 JUNIT_FILE = 'pytest_results.xml'
 COVERAGE_FILE = 'coverage_summary.txt'
+SERIAL_LOG = 'serial_log.txt'
+PANIC_MARKERS = (b'Guru Meditation Error', b'Task watchdog got triggered')
 
 
 def parse_junit(path):
@@ -37,13 +39,27 @@ def parse_junit(path):
     return tests
 
 
-def main():
-    if not os.path.exists(JUNIT_FILE):
-        print(f'{JUNIT_FILE} not found, nothing to summarize')
-        return
+def first_panic(path):
+    ''' Return the first firmware panic line in the DUT serial log, or None. '''
+    if not os.path.exists(path):
+        return None
+    with open(path, 'rb') as f:
+        for line in f:
+            if any(m in line for m in PANIC_MARKERS):
+                return line.decode(errors='replace').strip()
+    return None
 
-    tests = parse_junit(JUNIT_FILE)
-    if not tests:
+
+def main():
+    # A panic at boot stops pytest before any test ran, so the panic has to
+    # be reported on its own or the summary would stay silent.
+    panic = first_panic(SERIAL_LOG)
+    if panic and os.environ.get('GITHUB_ACTIONS') == 'true':
+        print(f'::error title=DUT panic::{panic}')
+
+    tests = parse_junit(JUNIT_FILE) if os.path.exists(JUNIT_FILE) else []
+    if not tests and not panic:
+        print(f'no results in {JUNIT_FILE}, nothing to summarize')
         return
 
     # Inline annotations, one per failed test (shown on the PR diff).
@@ -68,6 +84,11 @@ def main():
         f'**{passed} passed**, **{failed} failed**, {skipped} skipped '
         f'({len(tests)} total)',
         '',
+    ]
+    if panic:
+        lines += ['> [!CAUTION]', f'> Firmware panicked, see `{SERIAL_LOG}` in the logs artifact:',
+                  f'> `{panic}`', '']
+    lines += [
         '| Test file | Passed | Failed | Skipped |',
         '|---|---|---|---|',
     ]
