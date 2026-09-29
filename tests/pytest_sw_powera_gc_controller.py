@@ -123,6 +123,10 @@ def test_sw_powera_gc_axes_scaling_with_calib_native_report(blueretro):
         '0000'
     )
     calib = rsp['calib_data']
+    assert calib['rel_min'] == [0, 0, 0, 0]
+    assert calib['rel_max'] == [0, 0, 0, 0]
+    assert calib['neutral'] == [0, 0, 0, 0]
+    assert calib['deadzone'] == [4095, 4095, 4095, 4095]
     for ax in islice(axis, 0, 4):
         assert calib['neutral'][ax] == 0
         assert calib['rel_min'][ax] == 0
@@ -279,6 +283,10 @@ def test_sw_powera_gc_axes_scaling_with_calib_default_report(blueretro):
         '0000'
     )
     calib = rsp['calib_data']
+    assert calib['rel_min'] == [0, 0, 0, 0]
+    assert calib['rel_max'] == [0, 0, 0, 0]
+    assert calib['neutral'] == [0, 0, 0, 0]
+    assert calib['deadzone'] == [4095, 4095, 4095, 4095]
     for ax in islice(axis, 0, 4):
         assert calib['neutral'][ax] == 0
         assert calib['rel_min'][ax] == 0

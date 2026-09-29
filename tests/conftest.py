@@ -12,7 +12,7 @@ BOOT_TIMEOUT = 180
 # QEMU's first serial port, as redirected by the workflow. When it is there,
 # every test is checked against it for a firmware panic.
 SERIAL_LOG = os.environ.get('BLUERETRO_SERIAL_LOG', 'serial_log.txt')
-PANIC_MARKERS = (b'Guru Meditation Error', b'Task watchdog got triggered')
+PANIC_MARKERS = (b'Guru Meditation Error', b'WDT_SYS_RESET', b'RTCWDT_RTC_RESET')
 
 
 class BlueRetroDut(BlueRetroInjector):
@@ -41,7 +41,8 @@ class SerialLogWatcher:
         for marker in PANIC_MARKERS:
             idx = data.find(marker)
             if idx >= 0:
-                return data[idx:data.find(b'\n', idx)].decode(errors='replace').strip()
+                line_start = data.rfind(b'\n', 0, idx) + 1
+                return data[line_start:data.find(b'\n', idx)].decode(errors='replace').strip()
         return None
 
 

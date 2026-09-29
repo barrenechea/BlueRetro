@@ -95,3 +95,50 @@ def test_ps3_ds3_controller_axes_default_scaling(blueretro):
             assert rsp['generic_input']['axes'][ax] == axes[ax]['generic']
             assert rsp['mapped_input']['axes'][ax] == axes[ax]['mapped']
             assert rsp['wired_output']['axes'][ax] == axes[ax]['wired']
+
+
+def test_ps3_ds3_controller_triggers_default_scaling(blueretro):
+    ''' Press each trigger alone and check they are not swapped. '''
+    # Set device name
+    rsp = blueretro.send_name(DEVICE_NAME)
+    assert rsp['device_name']['device_id'] == 0
+    assert rsp['device_name']['device_type'] == 1
+    assert rsp['device_name']['device_subtype'] == 0
+    assert rsp['device_name']['device_name'] == 'PLAYSTATION(R)3'
+
+    # Init adapter with a few neutral state report
+    for _ in range(2):
+        blueretro.send_hid_report(
+            'a101'
+            '00000000'
+            '00'
+            '80808080'
+            '0000000000000000'
+            '0000'
+            '000000000000000000030516ffd'
+            '4000033ad77004001ef027401d8'
+            '01fe'
+        )
+
+    # Validate triggers default scaling, one at a time with the other at rest
+    for trigger, other in ((axis.LM, axis.RM), (axis.RM, axis.LM)):
+        for axes in axes_test_data_generator({trigger: ps3_axes[trigger]}, gc_axes, 0.0135):
+            axes[other] = {'wireless': ps3_axes[other]['neutral'], 'generic': 0, 'mapped': 0,
+                           'wired': gc_axes[other]['neutral']}
+            rsp = blueretro.send_hid_report(
+                'a101'
+                '00000000'
+                '00'
+                '80808080'
+                '0000000000000000'
+                f'{axes[axis.LM]["wireless"]:02x}{axes[axis.RM]["wireless"]:02x}'
+                '000000000000000000030516ffd'
+                '4000033ad77004001ef027401d8'
+                '01fe'
+            )
+
+            for ax in (axis.LM, axis.RM):
+                assert rsp['wireless_input']['axes'][ax] == axes[ax]['wireless']
+                assert rsp['generic_input']['axes'][ax] == axes[ax]['generic']
+                assert rsp['mapped_input']['axes'][ax] == axes[ax]['mapped']
+                assert rsp['wired_output']['axes'][ax] == axes[ax]['wired']

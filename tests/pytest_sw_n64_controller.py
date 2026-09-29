@@ -123,6 +123,10 @@ def test_sw_n64_controller_axes_scaling_with_calib_native_report(blueretro):
         '0000'
     )
     calib = rsp['calib_data']
+    assert calib['rel_min'] == [1349, 1421, 0, 0]
+    assert calib['rel_max'] == [1383, 1410, 0, 0]
+    assert calib['neutral'] == [1993, 2130, 0, 0]
+    assert calib['deadzone'] == [80, 80, 4095, 4095]
     sw_calib_axes = {axis.LX: {}, axis.LY: {}}
     for ax in islice(axis, 0, 2):
         sw_calib_axes[ax]['neutral'] = calib['neutral'][ax]
@@ -330,6 +334,10 @@ def test_sw_n64_controller_axes_scaling_with_calib_default_report(blueretro):
         '0000'
     )
     calib = rsp['calib_data']
+    assert calib['rel_min'] == [1349, 1421, 0, 0]
+    assert calib['rel_max'] == [1383, 1410, 0, 0]
+    assert calib['neutral'] == [1993, 2130, 0, 0]
+    assert calib['deadzone'] == [80, 80, 4095, 4095]
     sw_calib_axes = {axis.LX: {}, axis.LY: {}}
     for ax in islice(axis, 0, 2):
         sw_calib_axes[ax]['neutral'] = calib['neutral'][ax]

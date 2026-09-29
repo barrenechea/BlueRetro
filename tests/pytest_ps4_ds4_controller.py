@@ -114,6 +114,54 @@ def test_ps4_ds4_controller_axes_default_scaling_native_report(blueretro):
             assert rsp['wired_output']['axes'][ax] == axes[ax]['wired']
 
 
+def test_ps4_ds4_controller_triggers_default_scaling_native_report(blueretro):
+    ''' Press each trigger alone and check they are not swapped. '''
+    # Set device name
+    rsp = blueretro.send_name(DEVICE_NAME)
+    assert rsp['device_name']['device_id'] == 0
+    assert rsp['device_name']['device_type'] == bt_type.PS
+    assert rsp['device_name']['device_subtype'] == bt_subtype.SUBTYPE_DEFAULT
+    assert rsp['device_name']['device_name'] == 'Wireless Controller'
+
+    # Init adapter with a few neutral state report
+    for _ in range(2):
+        blueretro.send_hid_report(
+            'a111c000'
+            '80808080'
+            '080000'
+            '0000'
+            'bdc50415004700e6ff7301c51ba'
+            '8ef000000000002000000008000'
+            '000080000000008000000080000'
+            '000008000000080000000008000'
+            '0000800000000000cd2fab27'
+        )
+
+    # Validate triggers default scaling, one at a time with the other at rest
+    for trigger, other in ((axis.LM, axis.RM), (axis.RM, axis.LM)):
+        for axes in axes_test_data_generator({trigger: ps_axes[trigger]}, gc_axes, 0.0135):
+            axes[other] = {'wireless': ps_axes[other]['neutral'], 'generic': 0, 'mapped': 0,
+                           'wired': gc_axes[other]['neutral']}
+            rsp = blueretro.send_hid_report(
+                'a111c000'
+                '80808080'
+                '080000'
+                f'{axes[axis.LM]["wireless"]:02x}{axes[axis.RM]["wireless"]:02x}'
+                'bdc50415004700e6ff7301c51ba'
+                '8ef000000000002000000008000'
+                '000080000000008000000080000'
+                '000008000000080000000008000'
+                '0000800000000000cd2fab27'
+            )
+
+            for ax in (axis.LM, axis.RM):
+                assert rsp['wireless_input']['axes'][ax] == axes[ax]['wireless']
+                assert rsp['generic_input']['axes'][ax] == axes[ax]['generic']
+                assert rsp['mapped_input']['axes'][ax] == axes[ax]['mapped']
+                assert rsp['wired_output']['axes'][ax] == axes[ax]['wired']
+
+
+
 def test_ps4_ds4_controller_default_buttons_mapping_default_report(blueretro):
     ''' Press each buttons and check if default mapping is right. '''
     # Set device name

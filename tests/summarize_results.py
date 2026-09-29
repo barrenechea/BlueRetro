@@ -17,7 +17,7 @@ from collections import OrderedDict
 JUNIT_FILE = 'pytest_results.xml'
 COVERAGE_FILE = 'coverage_summary.txt'
 SERIAL_LOG = 'serial_log.txt'
-PANIC_MARKERS = (b'Guru Meditation Error', b'Task watchdog got triggered')
+PANIC_MARKERS = (b'Guru Meditation Error', b'WDT_SYS_RESET', b'RTCWDT_RTC_RESET')
 
 
 def parse_junit(path):

@@ -1,8 +1,11 @@
 ''' Tests for the Switch SNES controller. '''
+import pytest
 from device_data.test_data_generator import btns_generic_test_data
-from bit_helper import swap16, swap24
+from device_data.test_data_generator import btns_generic_to_wired_test_data
+from bit_helper import bit, swap16, swap24
 from device_data.sw import sw_d_snes_btns_mask, sw_n_snes_btns_mask
-from device_data.br import hat_to_ld_btns, bt_type, bt_subtype
+from device_data.br import hat_to_ld_btns, bt_type, bt_subtype, system, dev_mode, bt_conn_type, pad
+from device_data.n64 import n64_btns_mask
 
 
 DEVICE_NAME = 'SNES Controller'
@@ -86,3 +89,42 @@ def test_sw_snes_controller_default_buttons_mapping_default_report(blueretro):
 
         assert rsp['wireless_input']['hat'] == hat_value
         assert rsp['generic_input']['btns'][0] == br_btns
+
+
+@pytest.mark.parametrize('blueretro', [[system.N64, dev_mode.PAD, bt_conn_type.BT_BR_EDR]], indirect=True)
+def test_sw_snes_controller_n64_buttons_mapping_native_report(blueretro):
+    ''' Press each buttons and check if N64 mapping is right. '''
+    # Set device name
+    rsp = blueretro.send_name(DEVICE_NAME)
+    assert rsp['device_name']['device_id'] == 0
+    assert rsp['device_name']['device_type'] == bt_type.SW
+    assert rsp['device_name']['device_subtype'] == bt_subtype.SW_SNES
+    assert rsp['device_name']['device_name'] == 'SNES Controller'
+
+    # Init adapter with a few neutral state report
+    for _ in range(2):
+        blueretro.send_hid_report(
+            'a1300180'
+            '000000'
+            '000000'
+            '000000'
+            '00000000000000000000000000'
+            '00000000000000000000000000'
+            '0000000000000000000000'
+        )
+
+    # Validate buttons default mapping
+    # MT toggles the N64 controller/rumble pak, keep it out
+    for sw_btns, n64_btns in btns_generic_to_wired_test_data(sw_n_snes_btns_mask, n64_btns_mask, ~bit(pad.MT)):
+        rsp = blueretro.send_hid_report(
+            'a1300180'
+            f'{swap24(sw_btns):06x}'
+            '000000'
+            '000000'
+            '00000000000000000000000000'
+            '00000000000000000000000000'
+            '0000000000000000000000'
+        )
+
+        assert rsp['wireless_input']['btns'] >> 8 == sw_btns
+        assert rsp['wired_output']['btns'] == n64_btns

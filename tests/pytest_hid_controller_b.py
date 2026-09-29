@@ -9,6 +9,7 @@ from device_data.br import bt_conn_type, system, report_type, axis, dev_mode, ha
 from device_data.hid import hid_btns_mask
 from device_data.gc import gc_axes
 from device_data.saturn import saturn, saturn_btns_mask
+from device_data.n64 import n64
 
 
 DEVICE_NAME = 'HID Generic'
@@ -326,3 +327,91 @@ def test_hid_controller_b_saturn_triggers_mapping(blueretro):
         '0000'
     )
     assert rsp['wired_output']['btns'] ^ 0xFFFF == 0
+
+    # The wired trigger sits 2 below the raw value. From released, ON is over
+    # 0x8D; from pressed, OFF is under 0x56.
+    # Test trigger at ON threshold for digital bits
+    rsp = blueretro.send_hid_report(
+        'a101'
+        '8080'
+        '88'
+        '8f8f'
+        '00'
+        '0000'
+    )
+    assert rsp['wired_output']['btns'] ^ 0xFFFF == 0
+
+    # Test trigger just over ON threshold for digital bits
+    rsp = blueretro.send_hid_report(
+        'a101'
+        '8080'
+        '88'
+        '9090'
+        '00'
+        '0000'
+    )
+    assert rsp['wired_output']['btns'] ^ 0xFFFF == bit(saturn.L) | bit(saturn.R)
+
+    # Test trigger at OFF threshold for digital bits
+    rsp = blueretro.send_hid_report(
+        'a101'
+        '8080'
+        '88'
+        '5858'
+        '00'
+        '0000'
+    )
+    assert rsp['wired_output']['btns'] ^ 0xFFFF == bit(saturn.L) | bit(saturn.R)
+
+    # Test trigger just under OFF threshold for digital bits
+    rsp = blueretro.send_hid_report(
+        'a101'
+        '8080'
+        '88'
+        '5757'
+        '00'
+        '0000'
+    )
+    assert rsp['wired_output']['btns'] ^ 0xFFFF == 0
+
+
+@pytest.mark.parametrize('blueretro', [[system.N64, dev_mode.PAD, bt_conn_type.BT_BR_EDR]], indirect=True)
+def test_hid_controller_b_n64_triggers_mapping(blueretro):
+    ''' Press the triggers and check if the N64 Z button threshold is right. '''
+    blueretro.send_name(DEVICE_NAME)
+    blueretro.send_hid_desc(HID_DESC)
+
+    # Init adapter with a few neutral state report
+    for _ in range(3):
+        blueretro.send_hid_report(
+            'a101'
+            '8080'
+            '88'
+            '0000'
+            '00'
+            '0000'
+        )
+
+    # Z is a button on N64, so the triggers map to it through the default 50%
+    # threshold: int(0.5 * int(255 * 0.95)) = 121.
+    # Test trigger at threshold
+    rsp = blueretro.send_hid_report(
+        'a101'
+        '8080'
+        '88'
+        '7979'
+        '00'
+        '0000'
+    )
+    assert rsp['wired_output']['btns'] == bit(n64.Z)
+
+    # Test trigger just below threshold
+    rsp = blueretro.send_hid_report(
+        'a101'
+        '8080'
+        '88'
+        '7878'
+        '00'
+        '0000'
+    )
+    assert rsp['wired_output']['btns'] == 0

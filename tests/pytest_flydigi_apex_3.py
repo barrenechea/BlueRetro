@@ -1,5 +1,9 @@
 ''' Tests for generic HID controller. '''
 import pytest
+from itertools import islice
+from device_data.test_data_generator import axes_test_data_generator
+from device_data.br import axis
+from device_data.gc import gc_axes
 
 
 DEVICE_NAME = 'Flydigi APEX3'
@@ -108,3 +112,46 @@ def test_hid_descriptor(blueretro):
     assert rsp['hid_reports'][0]['usages'][18]["bit_size"] == 8
     assert rsp['hid_reports'][0]['usages'][18]["usage_page"] == 2
     assert rsp['hid_reports'][0]['usages'][18]["usage"] == 0xC4
+
+
+def test_hid_axes_default_scaling(blueretro):
+    ''' Set the various axes and check if the scaling is right. '''
+    blueretro.send_name(DEVICE_NAME)
+    blueretro.send_hid_desc(HID_DESC)
+
+    # Init adapter with a few neutral state report
+    for _ in range(2):
+        blueretro.send_hid_report(
+            'a101'
+            '00000000'
+            '00000000'
+            '0000'
+            '0000'
+            '0000'
+        )
+
+    # Sticks are signed, Logical Minimum (-128) & Logical Maximum (127)
+    hid_axes = {
+        axis.LX: {'neutral': 0, 'abs_max': 127, 'abs_min': 128, 'deadzone': 0},
+        axis.LY: {'neutral': 0, 'abs_max': 127, 'abs_min': 128, 'polarity': 1, 'deadzone': 0},
+        axis.RX: {'neutral': 0, 'abs_max': 127, 'abs_min': 128, 'deadzone': 0},
+        axis.RY: {'neutral': 0, 'abs_max': 127, 'abs_min': 128, 'polarity': 1, 'deadzone': 0},
+    }
+
+    # Validate axes default scaling
+    for axes in axes_test_data_generator(hid_axes, gc_axes, 0.0135):
+        rsp = blueretro.send_hid_report(
+            'a101'
+            f'{axes[axis.LX]["wireless"] & 0xFF:02x}{axes[axis.LY]["wireless"] & 0xFF:02x}'
+            f'{axes[axis.RX]["wireless"] & 0xFF:02x}{axes[axis.RY]["wireless"] & 0xFF:02x}'
+            '00000000'
+            '0000'
+            '0000'
+            '0000'
+        )
+
+        for ax in islice(axis, 0, 4):
+            assert rsp['wireless_input']['axes'][ax] == axes[ax]['wireless']
+            assert rsp['generic_input']['axes'][ax] == axes[ax]['generic']
+            assert rsp['mapped_input']['axes'][ax] == axes[ax]['mapped']
+            assert rsp['wired_output']['axes'][ax] == axes[ax]['wired']

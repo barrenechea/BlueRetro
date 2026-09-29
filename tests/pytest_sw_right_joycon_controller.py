@@ -123,6 +123,10 @@ def test_sw_right_joycon_controller_axes_scaling_with_calib_native_report(bluere
         '0000'
     )
     calib = rsp['calib_data']
+    assert calib['rel_min'] == [1238, 1151, 0, 0]
+    assert calib['rel_max'] == [1101, 1124, 0, 0]
+    assert calib['neutral'] == [2185, 1845, 0, 0]
+    assert calib['deadzone'] == [188, 188, 188, 188]
     sw_calib_axes = {axis.LX: {}, axis.LY: {'polarity': 1}}
     for ax in islice(axis, 0, 2):
         sw_calib_axes[ax ^ 1]['neutral'] = calib['neutral'][ax]

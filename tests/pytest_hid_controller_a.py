@@ -2,10 +2,11 @@
 import pytest
 from device_data.test_data_generator import btns_generic_test_data
 from device_data.test_data_generator import btns_generic_to_wired_test_data
-from bit_helper import swap32
+from bit_helper import bit, swap32
 from device_data.hid import hid_btns_mask
 from device_data.n64 import n64_btns_mask
-from device_data.br import system, dev_mode, bt_conn_type
+from device_data.gc import gc, gc_btns_mask
+from device_data.br import system, dev_mode, bt_conn_type, pad
 
 
 DEVICE_NAME = 'HID Generic'
@@ -96,3 +97,79 @@ def test_hid_controller_a_n64_buttons_mapping(blueretro):
 
         assert rsp['wireless_input']['btns'] == hid_btns
         assert rsp['wired_output']['btns'] == n64_btns
+
+
+@pytest.mark.parametrize('blueretro', [[system.GC, dev_mode.PAD, bt_conn_type.BT_BR_EDR]], indirect=True)
+def test_hid_controller_a_gc_buttons_mapping(blueretro):
+    ''' Press each buttons and check if GC mapping is right. '''
+    blueretro.send_name(DEVICE_NAME)
+    blueretro.send_hid_desc(HID_DESC)
+
+    # Init adapter with a few neutral state report
+    for _ in range(3):
+        blueretro.send_hid_report('a101808000000000')
+
+    # Pressing MS toggles the face buttons between position and names based
+    # mapping, and the toggle sticks across tests. Make sure the default
+    # position based mapping is active.
+    rsp = blueretro.send_hid_report(
+        'a1018080'
+        f'{swap32(hid_btns_mask[pad.RB_LEFT]):08x}'
+    )
+    if not rsp['wired_output']['btns'] & bit(gc.B):
+        for hid_btns in (hid_btns_mask[pad.MS], 0):
+            blueretro.send_hid_report(
+                'a1018080'
+                f'{swap32(hid_btns):08x}'
+            )
+
+    # Validate buttons default mapping, without MS so the mapping stays put
+    for hid_btns, gc_btns in btns_generic_to_wired_test_data(hid_btns_mask, gc_btns_mask, ~bit(pad.MS)):
+        rsp = blueretro.send_hid_report(
+            'a1018080'
+            f'{swap32(hid_btns):08x}'
+        )
+
+        assert rsp['wireless_input']['btns'] == hid_btns
+        # 0x8020 is always set in the GC report
+        assert rsp['wired_output']['btns'] == gc_btns | 0x8020
+
+
+# System Control collection with a lone Sys Main Menu bit, as older Xbox
+# firmware reports its Guide button.
+SYS_CTRL_DESC = bytes([
+    0x05, 0x01,        # Usage Page (Generic Desktop)
+    0x09, 0x80,        # Usage (Sys Control)
+    0xA1, 0x01,        # Collection (Application)
+    0x85, 0x02,        #   Report ID (2)
+    0x09, 0x85,        #   Usage (Sys Main Menu)
+    0x15, 0x00,        #   Logical Minimum (0)
+    0x25, 0x01,        #   Logical Maximum (1)
+    0x95, 0x01,        #   Report Count (1)
+    0x75, 0x01,        #   Report Size (1)
+    0x81, 0x02,        #   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+    0x15, 0x00,        #   Logical Minimum (0)
+    0x25, 0x00,        #   Logical Maximum (0)
+    0x75, 0x07,        #   Report Size (7)
+    0x95, 0x01,        #   Report Count (1)
+    0x81, 0x03,        #   Input (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+    0xC0,              # End Collection
+])
+
+
+def test_hid_controller_a_sys_main_menu_button(blueretro):
+    ''' Press Sys Main Menu and check if it maps to the generic MT button. '''
+    blueretro.send_name(DEVICE_NAME)
+    blueretro.send_hid_desc(HID_DESC + SYS_CTRL_DESC)
+
+    # Init adapter with a few neutral state report
+    for _ in range(3):
+        blueretro.send_hid_report('a101808000000000')
+    for _ in range(3):
+        blueretro.send_hid_report('a102' '00')
+
+    rsp = blueretro.send_hid_report('a102' '01')
+    assert rsp['generic_input']['btns'][0] == bit(pad.MT)
+
+    rsp = blueretro.send_hid_report('a102' '00')
+    assert rsp['generic_input']['btns'][0] == 0

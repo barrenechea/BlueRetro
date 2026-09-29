@@ -12,3 +12,6 @@ CONFIG_BLUERETRO_COVERAGE=y
 CONFIG_ETH_ENABLED=y
 CONFIG_ETH_USE_OPENETH=y
 CONFIG_HTTPD_WS_SUPPORT=y
+# The console UART drains slowly on a loaded host, so the per-report debug
+# prints can outlast the default 300ms and trip the interrupt watchdog.
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=5000
