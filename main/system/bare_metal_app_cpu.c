@@ -38,6 +38,7 @@
 #include <xtensa_api.h>
 #include <xtensa/config/core.h>
 #include <esp_rom_sys.h>
+#include "sdkconfig.h"
 #include "esp_private/startup_internal.h"
 
 typedef void (*wired_init_t)(void);
@@ -288,8 +289,15 @@ esp_err_t init_app_cpu_baremetal(void)
  * system_init_fn.txt says so against init_heap (CORE priority 100) - the ROM
  * initialises memory the allocator would otherwise have linked free-list
  * entries into. Registering here at priority 50 satisfies that ordering with
- * the supported mechanism, so no copy of IDF's startup.c is needed. */
+ * the supported mechanism, so no copy of IDF's startup.c is needed.
+ *
+ * Not in the QEMU build: there, bringing CPU1 up corrupts the FreeRTOS heap
+ * on nearly every boot (interrupt wdt in vListInsert during esp_netif_init,
+ * then a reboot loop). The tests only drive the core 0 wireless path, so
+ * CPU1 stays off. */
+#ifndef CONFIG_BLUERETRO_QEMU
 ESP_SYSTEM_INIT_FN(init_app_cpu, CORE, BIT(0), 50)
 {
     return init_app_cpu_baremetal();
 }
+#endif

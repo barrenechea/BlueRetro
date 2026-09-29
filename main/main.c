@@ -152,6 +152,9 @@ void app_main()
 {
     adapter_init();
 
+#ifndef CONFIG_BLUERETRO_QEMU
+    /* CPU1 is never brought up under QEMU, see bare_metal_app_cpu.c. */
     start_app_cpu(wired_init_task);
+#endif
     xTaskCreatePinnedToCore(wl_init_task, "wl_init_task", 2560, NULL, 10, NULL, 0);
 }
