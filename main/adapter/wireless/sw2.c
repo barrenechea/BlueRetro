@@ -198,12 +198,12 @@ static int32_t sw2_pad_init(struct bt_data *bt_data) {
                 sizeof(bt_data->raw_src_mappings[PAD].desc));
 
             meta[TRIG_L].neutral = sw2_gc_axes_meta[TRIG_L].neutral;
-            meta[TRIG_L].abs_max = sw2_gc_axes_meta[TRIG_L].abs_max;
-            meta[TRIG_L].abs_min = sw2_gc_axes_meta[TRIG_L].abs_min;
+            meta[TRIG_L].abs_max = sw2_gc_axes_meta[TRIG_L].abs_max * MAX_PULL_BACK;
+            meta[TRIG_L].abs_min = sw2_gc_axes_meta[TRIG_L].abs_min * MAX_PULL_BACK;
             meta[TRIG_L].deadzone = sw2_gc_axes_meta[TRIG_L].deadzone;
             meta[TRIG_R].neutral = sw2_gc_axes_meta[TRIG_R].neutral;
-            meta[TRIG_R].abs_max = sw2_gc_axes_meta[TRIG_R].abs_max;
-            meta[TRIG_R].abs_min = sw2_gc_axes_meta[TRIG_R].abs_min;
+            meta[TRIG_R].abs_max = sw2_gc_axes_meta[TRIG_R].abs_max * MAX_PULL_BACK;
+            meta[TRIG_R].abs_min = sw2_gc_axes_meta[TRIG_R].abs_min * MAX_PULL_BACK;
             meta[TRIG_R].deadzone = sw2_gc_axes_meta[TRIG_R].deadzone;
             break;
         }

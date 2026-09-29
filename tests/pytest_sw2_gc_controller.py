@@ -145,12 +145,14 @@ def test_sw2_gc_controller_triggers_default_scaling(blueretro):
 
     # The generator can't be used here: the trigger range is smaller than the
     # GC one, and the static deadzone of 8 sits on top of the 1.35% default,
-    # int(195 * 0.0135) + 8 = 10 counts over the neutral of 30.
+    # int(195 * 0.95 * 0.0135) + 8 = 10 counts over the neutral of 30.
+    # Order matters: the adapter grows its max once a value goes past it.
     # (counts over neutral, mapped)
     triggers_test_data = [
         (0, 0),
         (10, 0),  # At deadzone
         (11, 1),  # Just over deadzone
+        (185, 208),  # Pull-back value
         (195, 208),  # Fully pressed
     ]
 
